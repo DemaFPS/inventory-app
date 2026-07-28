@@ -1,6 +1,5 @@
 /* ===== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ===== */
 :root {
-    /* Light Theme (по умолчанию) */
     --bg-color: #f0f4f8;
     --blob-1: #00f2fe;
     --blob-2: #4facfe;
@@ -436,7 +435,7 @@ body {
     box-shadow: 0 8px 25px rgba(0,0,0,0.1);
 }
 
-/* ===== АДАПТИВ И АЛЬБОМНАЯ ОРИЕНТАЦИЯ ===== */
+/* ===== АДАПТИВ ===== */
 @media (min-width: 768px) {
     .app-container { max-width: 600px; }
     .stat-number { font-size: 2.2rem; }
