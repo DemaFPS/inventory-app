@@ -1,9 +1,5 @@
 /**
- * app.js – Исправленная версия
- * - QR-код со ссылкой теперь показывает диалог перехода
- * - После создания устройства сразу обновляется локальный список (без повторного запроса)
- * - Устранено дублирование записей при повторных сканированиях
- * - Оптимизирована производительность (меньше лишних вызовов loadInventory)
+ * app.js – Финальная версия с надёжной проверкой дубликатов и мгновенным поиском
  */
 
 // ============================
@@ -23,9 +19,9 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 
 // ============================
-// 1. КОНФИГУРАЦИЯ ПРОКСИ (ЗАМЕНИТЕ ПОСЛЕ ПЕРЕРАЗВЁРТЫВАНИЯ)
+// 1. КОНФИГУРАЦИЯ ПРОКСИ (ЗАМЕНИТЕ НА СВОЙ URL)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbw2tAfEF00R3jkVpI1l-9G_mkBuLyVBmvEQ6-PYpLTL6ps8Y18jTSzp0IW-opV7pmY/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwBbkVP-gFgGnBeETXRPhQIkm25Iaj3j_lFEqjc6yFDe308TuFP-bw_6Un40D_N9wuH/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -244,8 +240,8 @@ async function updateDevice(inventoryNumber, updates) {
         const idx = inventoryData.findIndex(d => d && d.inventoryNumber === inventoryNumber);
         if (idx !== -1) {
             inventoryData[idx] = { ...inventoryData[idx], ...updates };
+            localStorage.setItem('inventoryCache', JSON.stringify(inventoryData));
         }
-        localStorage.setItem('inventoryCache', JSON.stringify(inventoryData));
         return result;
     } catch (error) {
         showToast('Ошибка обновления: ' + error.message, 'danger');
@@ -253,6 +249,22 @@ async function updateDevice(inventoryNumber, updates) {
     }
 }
 
+// Функция проверки существования номера на сервере
+async function checkDeviceExistsOnServer(inventoryNumber) {
+    try {
+        const result = await callProxy('read'); // читаем все данные (это неэффективно, но для простоты)
+        const exists = result.inventory.some(d => {
+            const num = d && d.inventoryNumber ? String(d.inventoryNumber).trim() : '';
+            return normalizeInventoryNumber(num) === normalizeInventoryNumber(inventoryNumber);
+        });
+        return exists;
+    } catch (e) {
+        console.error('Ошибка проверки на сервере:', e);
+        return false;
+    }
+}
+
+// Функция создания устройства (с проверкой на сервере)
 async function addDevice(deviceData) {
     const { inventoryNumber, model, serialNumber, status, responsiblePerson, warrantyEndDate } = deviceData;
     if (!inventoryNumber || !validateInventoryNumber(inventoryNumber)) {
@@ -260,22 +272,35 @@ async function addDevice(deviceData) {
         throw new Error('Invalid inventory number');
     }
 
-    // Проверяем локально
+    // 1. Проверяем локально
     const normalized = normalizeInventoryNumber(inventoryNumber);
-    const existing = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
-    if (existing) {
-        showToast('Устройство с таким номером уже существует в базе', 'warning');
-        throw new Error('Duplicate');
+    const localExists = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
+    if (localExists) {
+        showToast('Устройство с таким номером уже существует (локально)', 'warning');
+        throw new Error('Duplicate local');
     }
 
+    // 2. Проверяем на сервере (если есть интернет)
+    if (navigator.onLine) {
+        const serverExists = await checkDeviceExistsOnServer(inventoryNumber);
+        if (serverExists) {
+            showToast('Устройство с таким номером уже существует в базе', 'warning');
+            // Обновляем локальный список, чтобы синхронизировать
+            await loadInventory();
+            updateDashboardStats();
+            throw new Error('Duplicate server');
+        }
+    }
+
+    // 3. Создаём
     try {
         const result = await callProxy('add', {
             ...deviceData,
             initiator: getInitiatorName()
         });
         showToast(result.message || 'Устройство создано', 'success');
-        
-        // Добавляем новое устройство в локальный список, чтобы избежать дублирования при повторных сканированиях
+
+        // Добавляем в локальный список (чтобы сразу найти при повторном сканировании)
         const now = new Date().toLocaleString('ru-RU');
         const newDevice = {
             inventoryNumber: inventoryNumber,
@@ -291,11 +316,14 @@ async function addDevice(deviceData) {
         inventoryData.push(newDevice);
         localStorage.setItem('inventoryCache', JSON.stringify(inventoryData));
         updateDashboardStats();
-        
+
         return result;
     } catch (error) {
         if (error.message && (error.message.includes('уже существует') || error.message.includes('Duplicate'))) {
             showToast('Устройство с таким номером уже существует в базе', 'warning');
+            // Обновляем список, чтобы синхронизировать
+            await loadInventory();
+            updateDashboardStats();
         } else {
             showToast('Ошибка создания: ' + error.message, 'danger');
         }
@@ -320,7 +348,7 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 6. СКАНЕР – ОБРАБОТКА QR И ШТРИХ-КОДОВ
+// 6. СКАНЕР
 // ============================
 async function initScanner() {
     if (isInitializingScanner) return;
@@ -386,9 +414,9 @@ function onScanSuccess(decodedText, decodedResult) {
     let format = decodedResult?.result?.format || decodedResult?.format || '';
     console.log('Формат:', format);
 
-    // --- Если содержимое начинается с http – это ссылка (QR-код) ---
+    // --- ОБРАБОТКА QR-КОДА СО ССЫЛКОЙ (всегда сначала проверяем) ---
     if (rawText.startsWith('http://') || rawText.startsWith('https://')) {
-        console.log('Обнаружена ссылка (QR-код)');
+        console.log('Обнаружена ссылка – показываем диалог перехода');
         if (navigator.onLine) {
             const modal = new bootstrap.Modal(document.getElementById('qrLinkModal'));
             document.getElementById('qrLinkText').textContent = rawText;
@@ -396,7 +424,7 @@ function onScanSuccess(decodedText, decodedResult) {
             modal.show();
         } else {
             savePendingScan(rawText, 'qr');
-            showToast('QR-код сохранён в журнале (офлайн).', 'warning');
+            showToast('QR-код (ссылка) сохранён в журнале (офлайн).', 'warning');
             setTimeout(() => {
                 if (document.getElementById('scanner').classList.contains('active')) initScanner();
             }, 1500);
@@ -404,51 +432,61 @@ function onScanSuccess(decodedText, decodedResult) {
         return;
     }
 
-    // --- Если это QR-код, но не ссылка ---
-    if (format === 'QR_CODE' || format === 'QR') {
-        console.log('Обнаружен QR-код (не ссылка)');
-        const normalized = normalizeInventoryNumber(rawText);
-        const device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
-        if (device) {
-            currentDevice = device;
-            showScreen('deviceCard');
-            renderDeviceCard(device);
-            return;
-        } else {
-            if (navigator.onLine) {
-                showCreateDeviceModal(rawText);
+    // --- QR-код без ссылки (или обычный штрих-код) ---
+    // Пытаемся найти устройство по номеру
+    const normalized = normalizeInventoryNumber(rawText);
+    console.log('Ищем устройство по номеру:', normalized);
+
+    // Поиск в локальном списке
+    let device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
+
+    // Если локально не найден, но есть интернет – пробуем проверить на сервере (на случай, если локальный кэш устарел)
+    if (!device && navigator.onLine) {
+        console.log('Локально не найден, проверяем на сервере...');
+        // Делаем запрос к прокси, чтобы получить актуальный список (но не перезаписываем весь массив, только ищем)
+        // Для простоты вызовем loadInventory() – это перезагрузит все данные, но мы сделаем это асинхронно, чтобы не блокировать UI
+        loadInventory().then(() => {
+            // После обновления данных ищем снова
+            const updatedDevice = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
+            if (updatedDevice) {
+                console.log('Найдено на сервере после обновления:', updatedDevice);
+                currentDevice = updatedDevice;
+                showScreen('deviceCard');
+                renderDeviceCard(updatedDevice);
             } else {
-                savePendingScan(rawText, 'barcode');
-                showToast('QR-код сохранён в журнале (офлайн).', 'warning');
-                setTimeout(() => {
-                    if (document.getElementById('scanner').classList.contains('active')) initScanner();
-                }, 1500);
+                // Всё равно не найдено – предлагаем создать
+                showCreateDeviceModal(rawText);
             }
-            return;
-        }
+        }).catch(err => {
+            console.error('Ошибка обновления данных:', err);
+            // В случае ошибки тоже предлагаем создать
+            showCreateDeviceModal(rawText);
+        });
+        return; // выходим, так как асинхронно обработаем
     }
 
-    // --- Остальное – штрих-код или обычный номер ---
-    console.log('Обнаружен штрих-код (или обычный номер)');
-    const normalized = normalizeInventoryNumber(rawText);
-    const device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
+    // Если устройство найдено локально – показываем карточку
     if (device) {
+        console.log('Устройство найдено локально:', device);
         currentDevice = device;
         showScreen('deviceCard');
         renderDeviceCard(device);
         return;
     }
 
-    // Не найден
-    if (navigator.onLine) {
-        showCreateDeviceModal(rawText);
-    } else {
+    // Если локально не найден и интернета нет – сохраняем в офлайн-очередь
+    if (!navigator.onLine) {
         savePendingScan(rawText, 'barcode');
-        showToast('Штрих-код сохранён в журнале (офлайн). После восстановления интернета будет выполнена проверка.', 'warning');
+        showToast('Нет интернета. Сканирование сохранено в журнале.', 'warning');
         setTimeout(() => {
             if (document.getElementById('scanner').classList.contains('active')) initScanner();
         }, 1500);
+        return;
     }
+
+    // Если дошли сюда – устройство не найдено ни локально, ни на сервере (но сервер мы уже проверили в ветке выше)
+    // На всякий случай, если мы не попали в асинхронную ветку – показываем модалку создания
+    showCreateDeviceModal(rawText);
 }
 
 function onScanError(err) {
@@ -476,7 +514,19 @@ function handleManualFind() {
         stopScanner();
     } else {
         if (navigator.onLine) {
-            showCreateDeviceModal(rawValue);
+            // Проверим на сервере
+            loadInventory().then(() => {
+                const updatedDevice = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
+                if (updatedDevice) {
+                    currentDevice = updatedDevice;
+                    showScreen('deviceCard');
+                    renderDeviceCard(updatedDevice);
+                } else {
+                    showCreateDeviceModal(rawValue);
+                }
+            }).catch(() => {
+                showCreateDeviceModal(rawValue);
+            });
         } else {
             savePendingScan(rawValue, 'barcode');
             showToast('Номер сохранён в журнале (офлайн).', 'warning');
@@ -606,7 +656,6 @@ async function performDeviceAction(action, data = {}) {
             currentDevice = updated;
             renderDeviceCard(updated);
         } else {
-            // Если не нашли в локальном списке – перезагрузим
             await loadInventory();
             const reloaded = inventoryData.find(d => d && d.inventoryNumber === inv);
             if (reloaded) {
@@ -891,11 +940,10 @@ async function confirmCreateDevice() {
         return;
     }
 
-    // Проверяем локально (уже может существовать, если было создано ранее)
+    // Проверяем локально
     const exists = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(inv));
     if (exists) {
         showToast('Устройство с таким номером уже существует', 'warning');
-        // Закрываем модалку и показываем карточку, если есть
         const device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(inv));
         if (device) {
             bootstrap.Modal.getInstance(document.getElementById('createDeviceModal')).hide();
@@ -917,30 +965,34 @@ async function confirmCreateDevice() {
 
         await addDevice({ inventoryNumber: inv, model, serialNumber: serial, status, responsiblePerson: responsible, warrantyEndDate: warranty });
 
-        // После создания обновляем локальный список уже в addDevice, но дополнительно загружаем с сервера для синхронизации
-        // (но необязательно, т.к. мы уже добавили локально)
-        // Однако чтобы получить актуальные данные (например, ID), можно перезагрузить, но это долго.
-        // Для скорости оставляем локальное добавление.
-
-        // Удаляем из очереди сканирований, если есть
+        // Удаляем из очереди сканирований
         let pendingScans = JSON.parse(localStorage.getItem('pendingScans') || '[]');
         pendingScans = pendingScans.filter(item => item.inventoryNumber !== inv);
         localStorage.setItem('pendingScans', JSON.stringify(pendingScans));
         renderLogs();
 
-        // Показываем карточку созданного устройства
+        // Находим устройство в обновлённом списке
         const device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(inv));
         if (device) {
             currentDevice = device;
             showScreen('deviceCard');
             renderDeviceCard(device);
         } else {
-            showToast('Устройство создано, но не найдено в списке. Обновите страницу.', 'warning');
+            // Если не нашли – перезагружаем данные с сервера
+            await loadInventory();
+            const reloaded = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(inv));
+            if (reloaded) {
+                currentDevice = reloaded;
+                showScreen('deviceCard');
+                renderDeviceCard(reloaded);
+            } else {
+                showToast('Устройство создано, но не найдено. Попробуйте обновить страницу.', 'warning');
+            }
         }
     } catch (e) {
         console.error('Ошибка создания:', e);
-        // Если ошибка "уже существует", возможно, устройство уже создано параллельно – попробуем найти
-        if (e.message && e.message.includes('уже существует')) {
+        // Если ошибка "уже существует" – возможно, устройство создано параллельно
+        if (e.message && (e.message.includes('уже существует') || e.message.includes('Duplicate'))) {
             const device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(inv));
             if (device) {
                 currentDevice = device;
@@ -956,7 +1008,7 @@ async function confirmCreateDevice() {
 }
 
 // ============================
-// 13. ОТЧЁТ (без изменений)
+// 13. ОТЧЁТ
 // ============================
 function generateCSV(data) {
     if (!data || !Array.isArray(data) || data.length === 0) return '';
