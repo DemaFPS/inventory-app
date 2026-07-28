@@ -14,8 +14,8 @@ const firebaseConfig = {
   projectId: "inventory-app-8f696",
   storageBucket: "inventory-app-8f696.firebasestorage.app",
   messagingSenderId: "8094390774",
-  appId: "1:8094390774:web:b1e63668361a7b61fd0fd7",
-  measurementId: "G-V8NQ4E7F8Y"
+  appId: "1:8094390774:web:d4670df16ea46a92fd0fd7",
+  measurementId: "G-WBXD71W2YF"
 };
 
 firebase.initializeApp(firebaseConfig);
