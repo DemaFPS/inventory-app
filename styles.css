@@ -546,11 +546,18 @@ body {
 /* Компьютеры и большие экраны */
 @media (min-width: 992px) {
     .app-container { max-width: 800px; }
-    .stat-number { font-size: 2.8rem; }   /* значительно увеличиваем */
-    .stat-label { font-size: 0.95rem; }   /* делаем более читаемым */
-    .stat-card { padding: 24px 12px; }    /* больше воздуха */
-    .dashboard-header h4 { font-size: 2.2rem; } /* заголовок крупнее */
+    .stat-number { font-size: 2.8rem; }
+    .stat-label { font-size: 0.95rem; }
+    .stat-card { padding: 24px 12px; }
+    .dashboard-header h4 { font-size: 2.2rem; }
     .dashboard-header { gap: 1.2rem; }
+    .row.g-2 {
+        justify-content: center;
+    }
+    .container-fluid {
+        padding-left: 20px;
+        padding-right: 20px;
+    }
 }
 
 /* Очень большие экраны (опционально) */
@@ -565,6 +572,14 @@ body {
     .nav-btn { font-size: 12px; padding: 0 10px; }
     .nav-btn i { font-size: 1.2rem; }
     .btn-content span { display: none; }
+
+    /* Чуть растягиваем карточку "В ремонте" на мобильных */
+    .repair-col .stat-card {
+        padding: 12px 10px; /* увеличиваем боковые отступы */
+    }
+    .repair-col .stat-number {
+        font-size: 1.9rem; /* немного увеличиваем цифру для лучшего восприятия */
+    }
 }
 
 /* ===== АДАПТИВ ХЕДЕРА ===== */
