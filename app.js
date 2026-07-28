@@ -1,8 +1,7 @@
 /**
  * app.js – Главный модуль мобильного приложения инвентаризации
- * Использует Google Sheets API через прокси-сервер (Google Apps Script)
- * 
- * Версия с Firebase Auth, офлайн-синхронизацией, редактированием, звуком, вибрацией и страницей логов
+ * Исправлен поиск устройства (регистронезависимый, обрезка пробелов)
+ * Изменены уведомления при сканировании
  */
 
 // ============================
@@ -57,11 +56,17 @@ function showToast(message, type = 'success') {
 /** Валидация инвентарного номера */
 function validateInventoryNumber(str) {
     if (!str || typeof str !== 'string') return false;
+    str = str.trim();
     if (str.length < 6 || str.length > 12) return false;
     const regex = /^[A-Za-zА-Яа-я0-9]+(?:-[A-Za-zА-Яа-я0-9]+)?$/;
     if (!regex.test(str)) return false;
-    if (str.length < 6 || str.length > 12) return false;
     return true;
+}
+
+/** Нормализация номера для сравнения (обрезаем пробелы, верхний регистр) */
+function normalizeInventoryNumber(str) {
+    if (!str) return '';
+    return str.trim().toUpperCase();
 }
 
 /** Переключение экранов */
@@ -193,10 +198,22 @@ async function callProxy(action, payload = {}) {
 async function loadInventory() {
     try {
         const result = await callProxy('read');
-        inventoryData = Array.isArray(result.inventory) ? result.inventory : [];
-        cabinetsData = Array.isArray(result.cabinets) ? result.cabinets : [];
+        // Нормализуем инвентарные номера (обрезаем пробелы)
+        inventoryData = Array.isArray(result.inventory) ? result.inventory.map(d => {
+            if (d && d.inventoryNumber) {
+                d.inventoryNumber = d.inventoryNumber.trim();
+            }
+            return d;
+        }) : [];
+        cabinetsData = Array.isArray(result.cabinets) ? result.cabinets.map(c => {
+            if (c && c.inventoryNumbers && typeof c.inventoryNumbers === 'string') {
+                c.inventoryNumbers = c.inventoryNumbers.split(',').map(s => s.trim());
+            }
+            return c;
+        }) : [];
         localStorage.setItem('inventoryCache', JSON.stringify(inventoryData));
         localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
+        console.log('Данные загружены:', inventoryData.length, 'единиц');
         return { inventory: inventoryData, cabinets: cabinetsData };
     } catch (error) {
         console.warn('Ошибка загрузки, пробуем кэш:', error);
@@ -336,31 +353,51 @@ function onScanSuccess(decodedText, decodedResult) {
     playBeep(true);
     stopScanner();
     
-    const invNumber = decodedText.trim();
-    if (validateInventoryNumber(invNumber)) {
-        const device = inventoryData.find(d => d && d.inventoryNumber === invNumber);
-        if (device) {
-            currentDevice = device;
-            showScreen('deviceCard');
-            renderDeviceCard(device);
-            return;
-        } else {
-            document.getElementById('scannerError')?.classList.remove('d-none');
-            setTimeout(() => {
-                document.getElementById('scannerError')?.classList.add('d-none');
-                if (document.getElementById('scanner').classList.contains('active')) {
-                    initScanner();
-                }
-            }, 2000);
-            savePendingScan(invNumber);
-        }
-    } else {
-        showToast('Неверный формат номера: ' + invNumber, 'warning');
+    const rawNumber = decodedText.trim();
+    // Проверяем валидацию
+    if (!validateInventoryNumber(rawNumber)) {
+        showToast('Неверный формат номера: ' + rawNumber, 'warning');
         setTimeout(() => {
             if (document.getElementById('scanner').classList.contains('active')) {
                 initScanner();
             }
-        }, 1000);
+        }, 1500);
+        return;
+    }
+
+    // Нормализуем для поиска
+    const normalized = normalizeInventoryNumber(rawNumber);
+    console.log('Ищем устройство с номером:', normalized);
+    
+    // Поиск с нормализацией (регистронезависимый)
+    const device = inventoryData.find(d => {
+        if (!d || !d.inventoryNumber) return false;
+        return normalizeInventoryNumber(d.inventoryNumber) === normalized;
+    });
+
+    if (device) {
+        console.log('Устройство найдено:', device);
+        currentDevice = device;
+        showScreen('deviceCard');
+        renderDeviceCard(device);
+    } else {
+        // Не найдено
+        console.warn('Устройство с номером', normalized, 'не найдено в базе');
+        document.getElementById('scannerError')?.classList.remove('d-none');
+        // Показываем сообщение в зависимости от наличия интернета
+        if (navigator.onLine) {
+            showToast('Устройство не найдено в базе', 'danger');
+        } else {
+            showToast('Нет интернета. Сканирование сохранено офлайн.', 'warning');
+        }
+        // Сохраняем в офлайн-очередь независимо от интернета (чтобы был лог)
+        savePendingScan(rawNumber);
+        setTimeout(() => {
+            document.getElementById('scannerError')?.classList.add('d-none');
+            if (document.getElementById('scanner').classList.contains('active')) {
+                initScanner();
+            }
+        }, 2500);
     }
 }
 
@@ -372,16 +409,20 @@ function onScanError(err) {
 function handleManualFind() {
     const input = document.getElementById('manualInvInput');
     if (!input) return;
-    const value = input.value.trim();
-    if (!value) {
+    const rawValue = input.value.trim();
+    if (!rawValue) {
         showToast('Введите инвентарный номер', 'warning');
         return;
     }
-    if (!validateInventoryNumber(value)) {
+    if (!validateInventoryNumber(rawValue)) {
         showToast('Неверный формат номера', 'danger');
         return;
     }
-    const device = inventoryData.find(d => d && d.inventoryNumber === value);
+    const normalized = normalizeInventoryNumber(rawValue);
+    const device = inventoryData.find(d => {
+        if (!d || !d.inventoryNumber) return false;
+        return normalizeInventoryNumber(d.inventoryNumber) === normalized;
+    });
     if (device) {
         currentDevice = device;
         showScreen('deviceCard');
@@ -389,10 +430,15 @@ function handleManualFind() {
         stopScanner();
     } else {
         document.getElementById('scannerError')?.classList.remove('d-none');
+        if (navigator.onLine) {
+            showToast('Устройство не найдено в базе', 'danger');
+        } else {
+            showToast('Нет интернета. Сканирование сохранено офлайн.', 'warning');
+        }
+        savePendingScan(rawValue);
         setTimeout(() => {
             document.getElementById('scannerError')?.classList.add('d-none');
-        }, 2000);
-        savePendingScan(value);
+        }, 2500);
     }
 }
 
@@ -445,7 +491,7 @@ function renderDeviceCard(device) {
 }
 
 // ============================
-// 8. ОБРАБОТЧИКИ ДЕЙСТВИЙ
+// 8. ОБРАБОТЧИКИ ДЕЙСТВИЙ (без изменений)
 // ============================
 
 async function performDeviceAction(action, data = {}) {
@@ -459,9 +505,7 @@ async function performDeviceAction(action, data = {}) {
         return;
     }
 
-    // Определяем инициатора
     const initiator = getInitiatorName();
-
     const now = new Date();
     const dateStr = now.toLocaleDateString('ru-RU');
     const timeStr = now.toLocaleTimeString('ru-RU');
@@ -515,7 +559,6 @@ async function performDeviceAction(action, data = {}) {
     history += newHistoryEntry;
     updates.history = history;
 
-    // Сохраняем в очередь офлайн
     if (!navigator.onLine) {
         savePendingAction(inv, updates);
         return;
@@ -523,7 +566,6 @@ async function performDeviceAction(action, data = {}) {
 
     try {
         await updateDevice(inv, updates);
-        // Перезагружаем карточку
         const updated = inventoryData.find(d => d && d.inventoryNumber === inv);
         if (updated) {
             currentDevice = updated;
@@ -542,7 +584,7 @@ async function performDeviceAction(action, data = {}) {
 }
 
 // ============================
-// 9. МОДУЛЬ ОБОРОТНОЙ ВЕДОМОСТИ
+// 9. МОДУЛЬ ОБОРОТНОЙ ВЕДОМОСТИ (с нормализацией)
 // ============================
 
 async function loadCabinetSelect() {
@@ -559,7 +601,6 @@ async function loadCabinetSelect() {
         opt.textContent = cab.cabinet;
         select.appendChild(opt);
     });
-    // Также заполним фильтр отчёта
     const reportFilter = document.getElementById('reportCabinetFilter');
     if (reportFilter) {
         reportFilter.innerHTML = '<option value="">Все кабинеты</option>';
@@ -589,7 +630,11 @@ function renderChecklist(cabinetName) {
     let itemsHtml = '';
 
     invNumbers.forEach(num => {
-        const exists = inventoryData.some(d => d && d.inventoryNumber === num && d.status !== 'Списан');
+        const normalizedNum = normalizeInventoryNumber(num);
+        const exists = inventoryData.some(d => {
+            if (!d || !d.inventoryNumber) return false;
+            return normalizeInventoryNumber(d.inventoryNumber) === normalizedNum && d.status !== 'Списан';
+        });
         if (exists) found++;
         const statusClass = exists ? 'list-group-item-success' : 'list-group-item-danger';
         const statusText = exists ? '✓ Найдено' : '✗ Не найдено';
@@ -611,7 +656,7 @@ function renderChecklist(cabinetName) {
 }
 
 // ============================
-// 10. ОФЛАЙН-РЕЖИМ (LocalStorage)
+// 10. ОФЛАЙН-РЕЖИМ (без изменений)
 // ============================
 
 function savePendingScan(inventoryNumber) {
@@ -619,8 +664,7 @@ function savePendingScan(inventoryNumber) {
     if (!Array.isArray(pending)) pending = [];
     pending.push({ inventoryNumber, timestamp: new Date().toISOString(), action: 'scanned' });
     localStorage.setItem('pendingScans', JSON.stringify(pending));
-    showToast('Сканирование сохранено офлайн', 'warning');
-    // Если мы на странице логов – обновляем их
+    // Уведомление показывается в вызывающем коде, здесь только сохраняем
     if (document.getElementById('logs').classList.contains('active')) {
         renderLogs();
     }
@@ -643,14 +687,12 @@ async function syncPendingData() {
         return;
     }
     
-    // Синхронизация сканирований (можно просто отметить как обработанные)
     const pendingScans = JSON.parse(localStorage.getItem('pendingScans') || '[]');
     if (pendingScans.length) {
         localStorage.removeItem('pendingScans');
         showToast(`Обработано ${pendingScans.length} отложенных сканирований`, 'info');
     }
 
-    // Синхронизация действий
     const pendingActions = JSON.parse(localStorage.getItem('pendingActions') || '[]');
     if (!pendingActions.length) {
         showToast('Нет отложенных действий для синхронизации', 'info');
@@ -662,7 +704,6 @@ async function syncPendingData() {
     for (const item of pendingActions) {
         try {
             await updateDevice(item.inventoryNumber, item.updates);
-            // успешно – не добавляем в failed
         } catch (e) {
             failed.push(item);
         }
@@ -676,7 +717,6 @@ async function syncPendingData() {
         showToast(`Синхронизировано ${pendingActions.length - failed.length} из ${pendingActions.length}`, 'warning');
     }
     renderLogs();
-    // Обновляем дашборд после синхронизации
     await loadInventory();
     updateDashboardStats();
 }
@@ -702,8 +742,6 @@ function renderLogs() {
     }
     
     let html = '';
-    
-    // Сначала сканирования
     if (pendingScans.length > 0) {
         html += `<div class="list-group-item list-group-item-secondary"><strong>📷 Сканирования (${pendingScans.length})</strong></div>`;
         pendingScans.forEach((item, index) => {
@@ -720,8 +758,6 @@ function renderLogs() {
             `;
         });
     }
-    
-    // Затем действия
     if (pendingActions.length > 0) {
         html += `<div class="list-group-item list-group-item-secondary"><strong>⚡ Действия (${pendingActions.length})</strong></div>`;
         pendingActions.forEach((item, index) => {
@@ -747,7 +783,6 @@ function renderLogs() {
             `;
         });
     }
-    
     container.innerHTML = html;
 }
 
@@ -798,13 +833,13 @@ function printReport() {
         showToast('Нет данных для печати', 'warning');
         return;
     }
-    // Применяем фильтр по кабинету, если выбран
     const cabinetFilter = document.getElementById('reportCabinetFilter')?.value;
     let filteredData = inventoryData;
     if (cabinetFilter) {
         const cabinet = cabinetsData.find(c => c && c.cabinet === cabinetFilter);
         if (cabinet && Array.isArray(cabinet.inventoryNumbers)) {
-            filteredData = inventoryData.filter(d => cabinet.inventoryNumbers.includes(d.inventoryNumber));
+            const normList = cabinet.inventoryNumbers.map(n => normalizeInventoryNumber(n));
+            filteredData = inventoryData.filter(d => normList.includes(normalizeInventoryNumber(d.inventoryNumber)));
         }
     }
     if (filteredData.length === 0) {
@@ -859,7 +894,7 @@ function updateActivePill(smooth = true) {
 }
 
 // ============================
-// 14. ИНИЦИАЛИЗАЦИЯ ПРИ ЗАГРУЗКЕ
+// 14. ИНИЦИАЛИЗАЦИЯ
 // ============================
 
 document.addEventListener('DOMContentLoaded', async function() {
@@ -935,7 +970,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
     }
 
-    // --- Настройка навигации (pill) ---
+    // --- Навигация ---
     activePill = document.getElementById('active-pill');
     navButtons = document.querySelectorAll('.nav-btn');
     
@@ -954,7 +989,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     });
     window.addEventListener('resize', () => updateActivePill(false));
 
-    // --- Назначение обработчиков кнопок ---
+    // --- Обработчики кнопок ---
     document.getElementById('scanBtn')?.addEventListener('click', () => showScreen('scanner'));
     document.getElementById('checklistBtn')?.addEventListener('click', () => {
         showScreen('checklist');
@@ -974,13 +1009,11 @@ document.addEventListener('DOMContentLoaded', async function() {
     document.getElementById('backFromReport')?.addEventListener('click', () => showScreen('dashboard'));
     document.getElementById('backFromLogs')?.addEventListener('click', () => showScreen('dashboard'));
 
-    // Ручной ввод
     document.getElementById('manualFindBtn')?.addEventListener('click', handleManualFind);
     document.getElementById('manualInvInput')?.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') handleManualFind();
     });
 
-    // Кнопка обновления данных на дашборде
     document.getElementById('refreshDataBtn')?.addEventListener('click', async function() {
         try {
             await loadInventory();
@@ -998,7 +1031,6 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     });
 
-    // Кнопка смены имени
     document.getElementById('changeNameBtn')?.addEventListener('click', function() {
         const newName = prompt('Введите ваше имя (для отображения в истории):', localUserName);
         if (newName && newName.trim()) {
@@ -1132,7 +1164,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (cabinetFilter) {
             const cabinet = cabinetsData.find(c => c && c.cabinet === cabinetFilter);
             if (cabinet && Array.isArray(cabinet.inventoryNumbers)) {
-                filteredData = inventoryData.filter(d => cabinet.inventoryNumbers.includes(d.inventoryNumber));
+                const normList = cabinet.inventoryNumbers.map(n => normalizeInventoryNumber(n));
+                filteredData = inventoryData.filter(d => normList.includes(normalizeInventoryNumber(d.inventoryNumber)));
             }
         }
         const csv = generateCSV(filteredData);
@@ -1153,7 +1186,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     // --- Логи ---
     document.getElementById('syncNowBtn')?.addEventListener('click', async function() {
         await syncPendingData();
-        // После синхронизации обновляем список
         renderLogs();
     });
     document.getElementById('clearLogsBtn')?.addEventListener('click', function() {
@@ -1165,7 +1197,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     });
 
-    // --- Автоматическая синхронизация при восстановлении сети ---
+    // --- Синхронизация при восстановлении сети ---
     window.addEventListener('online', function() {
         syncPendingData();
         loadInventory().then(() => {
@@ -1180,7 +1212,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
     });
 
-    // --- Периодическая проверка (каждые 2 минуты) ---
+    // --- Периодическая проверка ---
     setInterval(() => {
         if (navigator.onLine) {
             loadInventory().then(() => {
@@ -1196,6 +1228,6 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     }, 120000);
 
-    // --- Показываем дашборд по умолчанию ---
+    // --- Показываем дашборд ---
     showScreen('dashboard');
 });
