@@ -51,18 +51,18 @@
         <!-- ========== ЭКРАН 1: ДАШБОРД ========== -->
         <div id="dashboard" class="screen active">
             <div class="container-fluid p-3">
+                <!-- НОВЫЙ ХЕДЕР -->
                 <div class="dashboard-header">
                     <h4>Инвентаризация</h4>
-                    <div class="user-controls">
-                        <span id="userDisplay" class="badge bg-primary">Аноним</span>
-                        <button id="changeNameBtn" class="btn btn-outline-secondary btn-sm" title="Сменить имя">
-                            <i class="bi bi-person"></i>
-                        </button>
-                        <button id="refreshDataBtn" class="btn btn-outline-secondary btn-sm" title="Обновить данные">
-                            <i class="bi bi-arrow-clockwise"></i>
-                        </button>
-                    </div>
+                    <span id="userDisplay" class="badge bg-primary header-badge">Аноним</span>
+                    <button id="changeNameBtn" class="btn btn-outline-secondary btn-sm header-btn" title="Сменить имя">
+                        <i class="bi bi-person"></i>
+                    </button>
+                    <button id="refreshDataBtn" class="btn btn-outline-secondary btn-sm header-btn" title="Обновить данные">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
                 </div>
+
                 <!-- Карточки показателей -->
                 <div class="row g-2 mb-4">
                     <div class="col-4">
@@ -309,6 +309,7 @@
     </div>
 
     <!-- ===== МОДАЛКИ ===== -->
+
     <!-- Модалка передачи -->
     <div class="modal fade" id="transferModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">

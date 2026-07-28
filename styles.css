@@ -1,6 +1,5 @@
 /* ===== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ===== */
 :root {
-    /* Светлая тема */
     --bg-color: #f0f4f8;
     --blob-1: #00f2fe;
     --blob-2: #4facfe;
@@ -33,7 +32,6 @@
     --color-shadow: rgba(0,0,0,0.05);
     --device-header-bg: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
 
-    /* Лоадер – неоново-голубой (светлая тема) */
     --loader-gradient: conic-gradient(
         from 0deg,
         #00d4ff,
@@ -47,7 +45,6 @@
 }
 
 [data-theme="dark"] {
-    /* Тёмная тема */
     --bg-color: #050508;
     --blob-1: #00ff87;
     --blob-2: #60efff;
@@ -76,7 +73,6 @@
     --color-shadow: rgba(255,255,255,0.03);
     --device-header-bg: linear-gradient(135deg, #2d2d3f 0%, #1a1a2e 100%);
 
-    /* Лоадер – неоново-зелёный (тёмная тема) */
     --loader-gradient: conic-gradient(
         from 0deg,
         #00ff87,
@@ -113,22 +109,19 @@
 }
 .loading-main-text {
     font-weight: 700;
-    /* Светлая тема – синий (Bootstrap primary) – старый цвет */
-    color: #0d6efd;
+    color: #0d6efd; /* синий, как у Bootstrap primary – старый цвет */
     transition: color 0.5s ease;
 }
 .loading-sub-text {
     font-size: 0.9rem;
     transition: color 0.5s ease;
-    /* Светлая тема – ярко-голубой (цвет лоадера) */
-    color: var(--blob-1); /* #00f2fe */
+    color: var(--blob-1); /* ярко-голубой */
 }
-/* Тёмная тема */
 [data-theme="dark"] .loading-main-text {
-    color: var(--blob-1); /* #00ff87 – ярко-зелёный */
+    color: var(--blob-1); /* ярко-зелёный */
 }
 [data-theme="dark"] .loading-sub-text {
-    color: #00cc66; /* более тёмный зелёный */
+    color: #00cc66; /* тёмно-зелёный */
 }
 .custom-loader {
     width: 64px;
@@ -136,16 +129,8 @@
     border-radius: 50%;
     background: var(--loader-gradient);
     animation: spin 1.5s linear infinite;
-    mask: radial-gradient(
-        farthest-side,
-        transparent calc(100% - 10px),
-        #fff calc(100% - 9px)
-    );
-    -webkit-mask: radial-gradient(
-        farthest-side,
-        transparent calc(100% - 10px),
-        #fff calc(100% - 9px)
-    );
+    mask: radial-gradient(farthest-side, transparent calc(100% - 10px), #fff calc(100% - 9px));
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 10px), #fff calc(100% - 9px));
     margin: 0 auto;
 }
 @keyframes spin {
@@ -157,7 +142,6 @@
     margin: 0;
     padding: 0;
 }
-
 body {
     font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
     background: var(--bg-color);
@@ -191,15 +175,14 @@ body {
 .blob-1 { width: 60vw; height: 60vw; top: -20%; left: -20%; background: var(--blob-1); animation-delay: 0s; }
 .blob-2 { width: 55vw; height: 55vw; bottom: -20%; right: -20%; background: var(--blob-2); animation-delay: -6s; }
 .blob-3 { width: 40vw; height: 40vw; top: 25%; left: 30%; background: var(--blob-3); animation-delay: -12s; }
-
 @keyframes float {
-    0% { transform: translate(0, 0) scale(1) rotate(0deg); }
-    33% { transform: translate(8%, 12%) scale(1.1) rotate(10deg); }
-    66% { transform: translate(-6%, 8%) scale(0.9) rotate(-10deg); }
-    100% { transform: translate(0, -12%) scale(1.05) rotate(0deg); }
+    0% { transform: translate(0,0) scale(1) rotate(0deg); }
+    33% { transform: translate(8%,12%) scale(1.1) rotate(10deg); }
+    66% { transform: translate(-6%,8%) scale(0.9) rotate(-10deg); }
+    100% { transform: translate(0,-12%) scale(1.05) rotate(0deg); }
 }
 
-/* ===== КОНТЕЙНЕР ПРИЛОЖЕНИЯ ===== */
+/* ===== КОНТЕЙНЕР ===== */
 .app-container {
     max-width: 480px;
     margin: 0 auto;
@@ -212,8 +195,6 @@ body {
     padding-bottom: calc(var(--bottom-nav-height) + 20px);
     transition: background 0.3s, box-shadow 0.3s;
 }
-
-/* ===== ЭКРАНЫ ===== */
 .screen {
     display: none;
     padding: 16px 12px;
@@ -222,40 +203,33 @@ body {
     display: block;
 }
 
-/* ===== ХЕДЕР ДАШБОРДА ===== */
+/* ===== ХЕДЕР ДАШБОРДА (ОБНОВЛЁННЫЙ) ===== */
 .dashboard-header {
     display: flex;
-    justify-content: space-between;  /* заголовок слева, блок справа */
     align-items: center;
-    flex-wrap: nowrap;               /* пока не заставим перенести */
-    gap: 1rem;
+    gap: 0.5rem;
     margin-bottom: 1.5rem;
+    flex-wrap: nowrap;
     min-width: 0;
 }
 .dashboard-header h4 {
     margin: 0;
     white-space: nowrap;
     font-size: 1.8rem;
-    flex-shrink: 1;                 /* разрешаем сжиматься при необходимости */
-    min-width: 0;
+    flex-shrink: 0;
 }
-.dashboard-header .user-controls {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    flex-shrink: 1;                 /* разрешаем сжиматься, чтобы не вылезать */
-    white-space: nowrap;
-    min-width: 0;
-}
-.dashboard-header .user-controls .badge {
+.header-badge {
+    flex: 1; /* занимает всё свободное место между заголовком и кнопкой смены имени */
+    text-align: center;
     font-size: 1rem;
     padding: 0.4rem 0.6rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 120px;               /* ограничиваем ширину бейджа */
+    max-width: 150px;
+    margin: 0 0.5rem;
 }
-.dashboard-header .user-controls .btn {
+.header-btn {
     padding: 0.3rem 0.4rem;
     font-size: 0.9rem;
     white-space: nowrap;
@@ -264,87 +238,19 @@ body {
     justify-content: center;
     flex-shrink: 0;
 }
-.dashboard-header .user-controls .btn i {
+.header-btn i {
     font-size: 1.4rem;
 }
-
-/* ===== Адаптив для экранов ≤ 576px ===== */
-@media (max-width: 576px) {
-    .dashboard-header h4 {
-        font-size: 1.5rem;
-    }
-    .dashboard-header .user-controls .badge {
-        font-size: 0.9rem;
-        padding: 0.3rem 0.5rem;
-        max-width: 100px;
-    }
-    .dashboard-header .user-controls .btn i {
-        font-size: 1.2rem;
-    }
+#refreshDataBtn {
+    margin-left: auto; /* прижимаем к правому краю */
 }
 
-/* ===== Адаптив для экранов ≤ 430px (телефоны) ===== */
-@media (max-width: 430px) {
-    .dashboard-header {
-        gap: 0.5rem;                /* уменьшаем расстояние между заголовком и блоком */
-    }
-    .dashboard-header h4 {
-        font-size: 1.3rem;
-        flex-shrink: 0;             /* не даём сжиматься, чтобы он был фиксированного размера */
-    }
-    .dashboard-header .user-controls {
-        gap: 0.3rem;
-        flex-shrink: 0;             /* не даём блоку сжиматься, он займёт столько, сколько нужно */
-    }
-    .dashboard-header .user-controls .badge {
-        font-size: 0.8rem;
-        padding: 0.2rem 0.4rem;
-        max-width: 80px;
-    }
-    .dashboard-header .user-controls .btn {
-        padding: 0.1rem 0.2rem;
-    }
-    .dashboard-header .user-controls .btn i {
-        font-size: 1rem;
-    }
-}
-
-/* ===== Для очень узких экранов (≤ 360px) – включаем перенос ===== */
-@media (max-width: 360px) {
-    .dashboard-header {
-        flex-wrap: wrap;            /* разрешаем перенос на новую строку */
-        justify-content: space-between; /* заголовок слева, блок справа (но они на разных строках) */
-        gap: 0.3rem;
-    }
-    .dashboard-header h4 {
-        font-size: 1.1rem;
-        width: 100%;                /* занимает всю ширину */
-        text-align: left;           /* выравниваем по левому краю */
-        flex-shrink: 0;
-        white-space: normal;        /* разрешаем перенос слов, если слишком длинное */
-    }
-    .dashboard-header .user-controls {
-        width: 100%;                /* занимает всю ширину */
-        justify-content: flex-end;  /* прижимаем содержимое к правому краю */
-        gap: 0.2rem;
-        flex-shrink: 0;
-    }
-    .dashboard-header .user-controls .badge {
-        font-size: 0.7rem;
-        padding: 0.15rem 0.3rem;
-        max-width: 60px;
-    }
-    .dashboard-header .user-controls .btn i {
-        font-size: 0.9rem;
-    }
-}
 /* ===== СТАТИСТИКА ===== */
 .stat-card {
     background: var(--color-card-bg);
     border-radius: 16px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.06);
     padding: 12px 6px;
-    transition: transform 0.1s;
     border: 1px solid rgba(0,0,0,0.04);
 }
 .stat-number {
@@ -367,7 +273,7 @@ body {
     border-radius: 50px !important;
     background: var(--color-primary);
     border: none;
-    box-shadow: 0 4px 12px rgba(74, 144, 226, 0.3);
+    box-shadow: 0 4px 12px rgba(74,144,226,0.3);
     color: #fff;
 }
 .scan-btn:hover {
@@ -386,9 +292,7 @@ body {
     background: rgba(0,0,0,0.5);
     color: white;
     position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
+    top: 0; left: 0; right: 0;
     z-index: 10;
 }
 #reader {
@@ -402,9 +306,7 @@ body {
 }
 .manual-input {
     position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
+    bottom: 0; left: 0; right: 0;
     background: var(--color-card-bg);
     border-top: 1px solid var(--divider);
     padding: 12px 16px !important;
@@ -430,8 +332,7 @@ body {
     transition: background 0.3s;
 }
 .status-dot {
-    width: 20px;
-    height: 20px;
+    width: 20px; height: 20px;
     border-radius: 50%;
     flex-shrink: 0;
     border: 2px solid white;
@@ -444,7 +345,7 @@ body {
 .status-yellow { border-left-color: var(--color-yellow); }
 .status-red { border-left-color: var(--color-red); }
 
-/* ===== НОВАЯ НАВИГАЦИЯ (Liquid Nav) ===== */
+/* ===== НИЖНЯЯ НАВИГАЦИЯ (LIQUID NAV) ===== */
 .liquid-nav {
     position: fixed;
     bottom: 16px;
@@ -474,7 +375,6 @@ body {
     background: linear-gradient(180deg, var(--reflection-start) 0%, var(--reflection-end) 100%);
     pointer-events: none;
     z-index: 6;
-    transition: background 0.5s ease;
 }
 .liquid-glare-container {
     position: absolute;
@@ -509,8 +409,8 @@ body {
     background: var(--pill-bg);
     border-radius: 16px;
     box-shadow: var(--pill-shadow);
-    transition: transform 0.45s cubic-bezier(0.16, 1, 0.3, 1),
-                width 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+    transition: transform 0.45s cubic-bezier(0.16,1,0.3,1),
+                width 0.45s cubic-bezier(0.16,1,0.3,1),
                 background 0.5s ease, box-shadow 0.5s ease;
     z-index: 1;
 }
@@ -537,7 +437,7 @@ body {
     align-items: center;
     gap: 8px;
     pointer-events: none;
-    transition: transform 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+    transition: transform 0.2s cubic-bezier(0.32,0.72,0,1);
 }
 .nav-btn:active .btn-content { transform: scale(0.92); }
 .nav-btn.active { color: var(--icon-active); }
@@ -576,13 +476,13 @@ body {
     width: 18px;
     height: 18px;
     pointer-events: none;
-    transition: transform 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+    transition: transform 0.2s cubic-bezier(0.32,0.72,0,1);
 }
 .theme-btn:active .theme-icon-wrapper { transform: scale(0.8); }
 .theme-icon-wrapper svg {
     position: absolute;
     top: 0; left: 0;
-    transition: transform 0.5s cubic-bezier(0.34, 1.2, 0.64, 1), opacity 0.4s ease;
+    transition: transform 0.5s cubic-bezier(0.34,1.2,0.64,1), opacity 0.4s ease;
     stroke-width: 2.2;
 }
 .sun { opacity: 1; transform: rotate(0deg) scale(1); }
@@ -610,8 +510,6 @@ body {
 .btn-warning { background: #f57c00; border-color: #f57c00; color: #fff; }
 .btn-info { background: #0288d1; border-color: #0288d1; }
 .btn-danger { background: #c62828; border-color: #c62828; }
-
-/* ===== ОБЩИЕ КНОПКИ ===== */
 .btn-primary {
     background: var(--color-primary);
     border-color: var(--color-primary);
@@ -627,8 +525,6 @@ body {
 .btn-outline-secondary:hover {
     background: rgba(0,0,0,0.05);
 }
-
-/* ===== TOAST ===== */
 #liveToast {
     border-radius: 16px;
     box-shadow: 0 8px 25px rgba(0,0,0,0.1);
@@ -645,16 +541,78 @@ body {
     .btn-content span { display: none; }
 }
 
-/* Альбомная ориентация для сканера */
-@media (orientation: landscape) {
+/* ===== АДАПТИВ ХЕДЕРА ===== */
+@media (max-width: 576px) {
+    .dashboard-header h4 {
+        font-size: 1.5rem;
+    }
+    .header-badge {
+        font-size: 0.9rem;
+        padding: 0.3rem 0.5rem;
+        max-width: 120px;
+    }
+    .header-btn i {
+        font-size: 1.2rem;
+    }
+}
+@media (max-width: 430px) {
+    .dashboard-header {
+        gap: 0.3rem;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+    .dashboard-header h4 {
+        font-size: 1.3rem;
+        flex-shrink: 0;
+        width: 100%;
+        text-align: center;
+    }
+    .header-badge {
+        flex: 0 1 auto;
+        font-size: 0.8rem;
+        padding: 0.2rem 0.4rem;
+        max-width: 80px;
+        margin: 0;
+        text-align: center;
+    }
+    .header-btn {
+        padding: 0.1rem 0.2rem;
+    }
+    .header-btn i {
+        font-size: 1rem;
+    }
+    #refreshDataBtn {
+        margin-left: 0;
+    }
+}
+@media (max-width: 360px) {
+    .dashboard-header h4 {
+        font-size: 1.1rem;
+    }
+    .header-badge {
+        font-size: 0.7rem;
+        padding: 0.15rem 0.3rem;
+        max-width: 60px;
+    }
+    .header-btn i {
+        font-size: 0.9rem;
+    }
+}
+
+/* ===== АЛЬБОМНАЯ ОРИЕНТАЦИЯ ТОЛЬКО ДЛЯ МОБИЛЬНЫХ ===== */
+@media (max-width: 768px) and (orientation: landscape) {
     .app-container {
         max-width: 100%;
         border-radius: 0;
         padding-bottom: 0;
         min-height: 100vh;
     }
-    .liquid-nav { display: none; }
-    #reader { min-height: 80vh; }
+    .liquid-nav {
+        display: none !important; /* скрываем панель только на телефонах в горизонтальном режиме */
+    }
+    #reader {
+        min-height: 80vh;
+    }
     .manual-input {
         position: fixed;
         bottom: 20px;
@@ -667,9 +625,19 @@ body {
         padding: 12px !important;
         box-shadow: 0 4px 20px rgba(0,0,0,0.3);
     }
-    .scanner-header { background: rgba(0,0,0,0.3); }
+    .scanner-header {
+        background: rgba(0,0,0,0.3);
+    }
     .scanner-container {
         min-height: 100vh;
         border-radius: 0;
+    }
+}
+
+/* На широких экранах (компьютер) панель шире */
+@media (min-width: 769px) {
+    .liquid-nav {
+        max-width: 700px;
+        width: calc(100% - 40px);
     }
 }
