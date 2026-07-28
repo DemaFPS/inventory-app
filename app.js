@@ -21,7 +21,7 @@ const auth = firebase.auth();
 // ============================
 // 1. КОНФИГУРАЦИЯ ПРОКСИ (ОБЯЗАТЕЛЬНО ЗАМЕНИТЕ ПОСЛЕ ПЕРЕРАЗВЁРТЫВАНИЯ)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/ВАШ_НОВЫЙ_АДРЕС/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwlTAIEClODtioiqSQw-sjJglLwX8JZ_Zta8Ef8n7NBgPFWEwVIQdbznIKaiDz4N5rl/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
