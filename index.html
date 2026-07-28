@@ -13,7 +13,6 @@
             } else {
                 // По умолчанию светлая тема
                 document.documentElement.setAttribute('data-theme', 'light');
-                // Сохраняем её, чтобы при следующем заходе была та же
                 localStorage.setItem('appTheme', 'light');
             }
         })();
@@ -53,11 +52,11 @@
         <!-- ========== ЭКРАН 1: ДАШБОРД ========== -->
         <div id="dashboard" class="screen active">
             <div class="container-fluid p-3">
-                <div class="d-flex justify-content-between align-items-center mb-3">
+                <div class="dashboard-header">
                     <h4>Инвентаризация</h4>
-                    <div>
-                        <span id="userDisplay" class="badge bg-primary me-2" style="font-size:0.8rem;">Аноним</span>
-                        <button id="changeNameBtn" class="btn btn-outline-secondary btn-sm me-1" title="Сменить имя">
+                    <div class="user-controls">
+                        <span id="userDisplay" class="badge bg-primary">Аноним</span>
+                        <button id="changeNameBtn" class="btn btn-outline-secondary btn-sm" title="Сменить имя">
                             <i class="bi bi-person"></i>
                         </button>
                         <button id="refreshDataBtn" class="btn btn-outline-secondary btn-sm" title="Обновить данные">
