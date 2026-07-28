@@ -113,19 +113,19 @@
 }
 .loading-main-text {
     font-weight: 700;
-    /* Светлая тема – синеватый (как старый primary) */
-    color: var(--color-primary); /* #4A90E2 или #0d6efd если хотите точнее */
+    /* Светлая тема – синий (Bootstrap primary) – старый цвет */
+    color: #0d6efd;
     transition: color 0.5s ease;
 }
 .loading-sub-text {
     font-size: 0.9rem;
     transition: color 0.5s ease;
     /* Светлая тема – ярко-голубой (цвет лоадера) */
-    color: var(--blob-1);
+    color: var(--blob-1); /* #00f2fe */
 }
 /* Тёмная тема */
 [data-theme="dark"] .loading-main-text {
-    color: var(--blob-1); /* ярко-зелёный */
+    color: var(--blob-1); /* #00ff87 – ярко-зелёный */
 }
 [data-theme="dark"] .loading-sub-text {
     color: #00cc66; /* более тёмный зелёный */
@@ -228,25 +228,25 @@ body {
     justify-content: space-between;
     align-items: center;
     flex-wrap: nowrap;
-    gap: 2rem;                     /* увеличенный отступ между заголовком и кнопками */
+    gap: 2rem;
     margin-bottom: 1.5rem;
     min-width: 0;
 }
 .dashboard-header h4 {
     margin: 0;
     white-space: nowrap;
-    font-size: 1.8rem;             /* уменьшенный заголовок (было 2.2rem) */
+    font-size: 1.8rem;
     flex-shrink: 0;
 }
 .dashboard-header .user-controls {
     display: flex;
     align-items: center;
-    gap: 0.75rem;                  /* расстояние между самими кнопками – меньше, чем gap выше */
+    gap: 0.75rem;
     flex-shrink: 0;
     white-space: nowrap;
 }
 .dashboard-header .user-controls .badge {
-    font-size: 1rem;               /* увеличенный шрифт бейджа */
+    font-size: 1rem;
     padding: 0.5rem 0.8rem;
     white-space: nowrap;
 }
@@ -259,7 +259,7 @@ body {
     justify-content: center;
 }
 .dashboard-header .user-controls .btn i {
-    font-size: 1.6rem;             /* увеличенные иконки */
+    font-size: 1.6rem;
 }
 /* Адаптив для маленьких экранов */
 @media (max-width: 480px) {
@@ -290,6 +290,35 @@ body {
     }
     .dashboard-header .user-controls .btn i {
         font-size: 1.1rem;
+    }
+}
+/* Дополнительный адаптив для очень узких экранов (≤ 360px) – перенос элементов */
+@media (max-width: 360px) {
+    .dashboard-header {
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        justify-content: center;
+    }
+    .dashboard-header h4 {
+        font-size: 1.1rem;
+        text-align: center;
+        width: 100%;
+        white-space: normal; /* разрешаем перенос, если не влезает */
+    }
+    .dashboard-header .user-controls {
+        gap: 0.3rem;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+    .dashboard-header .user-controls .badge {
+        font-size: 0.65rem;
+        padding: 0.15rem 0.3rem;
+    }
+    .dashboard-header .user-controls .btn {
+        padding: 0.1rem 0.2rem;
+    }
+    .dashboard-header .user-controls .btn i {
+        font-size: 0.9rem;
     }
 }
 
