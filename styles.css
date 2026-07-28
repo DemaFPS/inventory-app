@@ -245,34 +245,6 @@ body {
     margin-left: auto;
 }
 
-/* ===== АДАПТИВ ДЛЯ ШИРОКИХ ЭКРАНОВ (компьютер) ===== */
-@media (min-width: 769px) {
-    .app-container {
-        max-width: 700px; /* увеличиваем контейнер для компьютера */
-    }
-    .dashboard-header {
-        gap: 1rem;
-    }
-    .header-badge {
-        flex: 0 0 auto; /* не растягивается */
-        max-width: 200px;
-        margin-right: auto; /* прижимаем кнопки вправо */
-    }
-    #changeNameBtn {
-        margin-left: auto; /* прижимаем обе кнопки вправо */
-    }
-    #refreshDataBtn {
-        margin-left: 0.5rem; /* небольшой отступ между кнопками */
-    }
-    .header-btn i {
-        font-size: 1.2rem; /* чуть меньше на десктопе */
-    }
-    .liquid-nav {
-        max-width: 700px;
-        width: calc(100% - 40px);
-    }
-}
-
 /* ===== СТАТИСТИКА ===== */
 .stat-card {
     background: var(--color-card-bg);
@@ -562,10 +534,33 @@ body {
 }
 
 /* ===== АДАПТИВ ===== */
+
+/* Планшеты и маленькие ноутбуки */
 @media (min-width: 768px) {
     .app-container { max-width: 600px; }
     .stat-number { font-size: 2.2rem; }
+    .stat-label { font-size: 0.8rem; }
+    .stat-card { padding: 16px 8px; }
 }
+
+/* Компьютеры и большие экраны */
+@media (min-width: 992px) {
+    .app-container { max-width: 800px; }
+    .stat-number { font-size: 2.8rem; }   /* значительно увеличиваем */
+    .stat-label { font-size: 0.95rem; }   /* делаем более читаемым */
+    .stat-card { padding: 24px 12px; }    /* больше воздуха */
+    .dashboard-header h4 { font-size: 2.2rem; } /* заголовок крупнее */
+    .dashboard-header { gap: 1.2rem; }
+}
+
+/* Очень большие экраны (опционально) */
+@media (min-width: 1400px) {
+    .app-container { max-width: 1000px; }
+    .stat-number { font-size: 3.2rem; }
+    .stat-label { font-size: 1.1rem; }
+}
+
+/* Мобильные устройства – ширина до 480px */
 @media (max-width: 480px) {
     .nav-btn { font-size: 12px; padding: 0 10px; }
     .nav-btn i { font-size: 1.2rem; }
@@ -665,4 +660,27 @@ body {
     }
 }
 
-/* ===== ШИРОКИЕ ЭКРАНЫ (компьютер) – уже добавлено выше ===== */
+/* ===== ШИРОКИЕ ЭКРАНЫ (компьютер) – дополнительные правки для кнопок ===== */
+@media (min-width: 769px) {
+    .liquid-nav {
+        max-width: 700px;
+        width: calc(100% - 40px);
+    }
+    .dashboard-header {
+        gap: 1rem;
+    }
+    .header-badge {
+        flex: 0 0 auto;
+        max-width: 200px;
+        margin-right: auto;
+    }
+    #changeNameBtn {
+        margin-left: auto;
+    }
+    #refreshDataBtn {
+        margin-left: 0.5rem;
+    }
+    .header-btn i {
+        font-size: 1.2rem;
+    }
+}
