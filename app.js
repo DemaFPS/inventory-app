@@ -1,6 +1,5 @@
 /**
- * app.js – Главный модуль мобильного приложения инвентаризации
- * Обработка QR-кодов, создание новых устройств, улучшенная синхронизация
+ * app.js – Главный модуль с полной поддержкой QR, создания устройств, синхронизации
  */
 
 // ============================
@@ -20,9 +19,9 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 
 // ============================
-// 1. КОНФИГУРАЦИЯ ПРОКСИ (ЗАМЕНИТЕ НА СВОЙ URL)
+// 1. КОНФИГУРАЦИЯ ПРОКСИ (ОБЯЗАТЕЛЬНО ЗАМЕНИТЕ ПОСЛЕ ПЕРЕРАЗВЁРТЫВАНИЯ)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbziWfHY72yS99qNRX7XoQOS-y7zv8ZIXMS51YyLpz3kAQELFpYwkpxeeotBCI1dZ4jt/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/ВАШ_НОВЫЙ_АДРЕС/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -65,6 +64,36 @@ function normalizeInventoryNumber(str) {
     return str.trim().toUpperCase();
 }
 
+function parseDateFromString(dateStr) {
+    if (!dateStr) return null;
+    // Удаляем всё после '(' или пробела (например, "(просрочена)")
+    let clean = dateStr.split('(')[0].split(' ')[0].trim();
+    const parts = clean.split('.');
+    if (parts.length === 3) {
+        const day = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        const year = parseInt(parts[2], 10);
+        if (!isNaN(day) && !isNaN(month) && !isNaN(year)) {
+            return new Date(year, month, day);
+        }
+    }
+    return null;
+}
+
+function isWarrantyExpiring(warrantyDateStr) {
+    const date = parseDateFromString(warrantyDateStr);
+    if (!date) return false;
+    const now = new Date();
+    const diff = (date - now) / (1000 * 60 * 60 * 24);
+    return diff >= 0 && diff <= 30;
+}
+
+function isWarrantyExpired(warrantyDateStr) {
+    const date = parseDateFromString(warrantyDateStr);
+    if (!date) return false;
+    return date < new Date();
+}
+
 function showScreen(screenId) {
     if (!screenId) return;
     document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
@@ -95,26 +124,6 @@ function showScreen(screenId) {
 function formatDate(dateStr) {
     if (!dateStr) return '—';
     return dateStr;
-}
-
-function isWarrantyExpiring(warrantyDateStr) {
-    if (!warrantyDateStr) return false;
-    const parts = warrantyDateStr.split('.');
-    if (parts.length !== 3) return false;
-    const date = new Date(parts[2], parts[1] - 1, parts[0]);
-    if (isNaN(date.getTime())) return false;
-    const now = new Date();
-    const diff = (date - now) / (1000 * 60 * 60 * 24);
-    return diff >= 0 && diff <= 30;
-}
-
-function isWarrantyExpired(warrantyDateStr) {
-    if (!warrantyDateStr) return false;
-    const parts = warrantyDateStr.split('.');
-    if (parts.length !== 3) return false;
-    const date = new Date(parts[2], parts[1] - 1, parts[0]);
-    if (isNaN(date.getTime())) return false;
-    return date < new Date();
 }
 
 function getStatusColorClass(device) {
@@ -156,7 +165,7 @@ function getInitiatorName() {
 }
 
 // ============================
-// 4. РАБОТА С ПРОКСИ (Google Sheets API)
+// 4. РАБОТА С ПРОКСИ
 // ============================
 
 async function callProxy(action, payload = {}) {
@@ -240,7 +249,6 @@ async function updateDevice(inventoryNumber, updates) {
     }
 }
 
-// НОВАЯ ФУНКЦИЯ: создание устройства
 async function addDevice(deviceData) {
     const { inventoryNumber, model, serialNumber, status, responsiblePerson, warrantyEndDate } = deviceData;
     if (!inventoryNumber || !validateInventoryNumber(inventoryNumber)) {
@@ -253,7 +261,6 @@ async function addDevice(deviceData) {
             initiator: getInitiatorName()
         });
         showToast(result.message || 'Устройство создано', 'success');
-        // Обновляем локальный кэш
         await loadInventory();
         return result;
     } catch (error) {
@@ -263,7 +270,7 @@ async function addDevice(deviceData) {
 }
 
 // ============================
-// 5. МОДУЛЬ ДАШБОРДА
+// 5. ДАШБОРД
 // ============================
 
 function updateDashboardStats() {
@@ -273,13 +280,14 @@ function updateDashboardStats() {
         const status = d && d.status || '';
         return status === 'Списан' || status === 'В ремонте';
     }).length;
+
     document.getElementById('totalCount').textContent = total;
     document.getElementById('expiringCount').textContent = expiring;
     document.getElementById('inactiveCount').textContent = inactive;
 }
 
 // ============================
-// 6. МОДУЛЬ СКАНЕРА (с определением формата)
+// 6. СКАНЕР (с определением QR/штрих-код)
 // ============================
 
 async function initScanner() {
@@ -342,23 +350,19 @@ function onScanSuccess(decodedText, decodedResult) {
     playBeep(true);
     stopScanner();
 
-    // Определяем формат
     let format = decodedResult?.result?.format || decodedResult?.format || '';
     console.log('Формат:', format);
 
     const rawText = decodedText.trim();
 
-    // --- QR-код ---
+    // --- QR-код (или ссылка) ---
     if (format === 'QR_CODE' || format === 'QR' || rawText.startsWith('http://') || rawText.startsWith('https://')) {
-        // Это QR-код (или просто ссылка)
         if (navigator.onLine) {
-            // Показать диалог перехода
             const modal = new bootstrap.Modal(document.getElementById('qrLinkModal'));
             document.getElementById('qrLinkText').textContent = rawText;
             document.getElementById('qrLinkHref').href = rawText;
             modal.show();
         } else {
-            // Офлайн – сохраняем в журнал
             savePendingScan(rawText, 'qr');
             showToast('QR-код сохранён в журнале (офлайн). После восстановления интернета будет предложен переход.', 'warning');
             setTimeout(() => {
@@ -368,7 +372,7 @@ function onScanSuccess(decodedText, decodedResult) {
         return;
     }
 
-    // --- Штрих-код (EAN-13 или другой номер) ---
+    // --- Штрих-код (или обычный номер) ---
     const normalized = normalizeInventoryNumber(rawText);
     console.log('Ищем устройство с номером:', normalized);
 
@@ -386,10 +390,8 @@ function onScanSuccess(decodedText, decodedResult) {
 
     // Не найден
     if (navigator.onLine) {
-        // Предложить создать новое устройство
         showCreateDeviceModal(rawText);
     } else {
-        // Офлайн – сохраняем в журнал
         savePendingScan(rawText, 'barcode');
         showToast('Штрих-код сохранён в журнале (офлайн). После восстановления интернета будет выполнена проверка.', 'warning');
         setTimeout(() => {
@@ -436,7 +438,7 @@ function handleManualFind() {
 }
 
 // ============================
-// 7. МОДУЛЬ КАРТОЧКИ УСТРОЙСТВА
+// 7. КАРТОЧКА УСТРОЙСТВА
 // ============================
 
 function renderDeviceCard(device) {
@@ -479,7 +481,7 @@ function renderDeviceCard(device) {
 }
 
 // ============================
-// 8. ОБРАБОТЧИКИ ДЕЙСТВИЙ (без изменений)
+// 8. ОБРАБОТЧИКИ ДЕЙСТВИЙ (передать, ремонт, склад, списание, редактировать)
 // ============================
 
 async function performDeviceAction(action, data = {}) {
@@ -572,7 +574,7 @@ async function performDeviceAction(action, data = {}) {
 }
 
 // ============================
-// 9. МОДУЛЬ ОБОРОТНОЙ ВЕДОМОСТИ (с нормализацией)
+// 9. ОБОРОТНАЯ ВЕДОМОСТЬ
 // ============================
 
 async function loadCabinetSelect() {
@@ -589,6 +591,7 @@ async function loadCabinetSelect() {
         opt.textContent = cab.cabinet;
         select.appendChild(opt);
     });
+    // Заполняем фильтр отчёта
     const reportFilter = document.getElementById('reportCabinetFilter');
     if (reportFilter) {
         reportFilter.innerHTML = '<option value="">Все кабинеты</option>';
@@ -644,7 +647,7 @@ function renderChecklist(cabinetName) {
 }
 
 // ============================
-// 10. ОФЛАЙН-РЕЖИМ (с поддержкой типов)
+// 10. ОФЛАЙН-РЕЖИМ И СИНХРОНИЗАЦИЯ
 // ============================
 
 function savePendingScan(inventoryNumber, type = 'barcode') {
@@ -654,7 +657,7 @@ function savePendingScan(inventoryNumber, type = 'barcode') {
         inventoryNumber, 
         timestamp: new Date().toISOString(), 
         action: 'scanned',
-        type: type // 'barcode' или 'qr'
+        type: type
     });
     localStorage.setItem('pendingScans', JSON.stringify(pending));
     if (document.getElementById('logs').classList.contains('active')) {
@@ -679,40 +682,36 @@ async function syncPendingData() {
         return;
     }
     
-    // Сначала синхронизируем сканирования
+    // Сканирования
     const pendingScans = JSON.parse(localStorage.getItem('pendingScans') || '[]');
     if (pendingScans.length) {
         const toRemove = [];
         for (const item of pendingScans) {
             if (item.type === 'qr') {
-                // QR-код: показываем диалог перехода
                 const modal = new bootstrap.Modal(document.getElementById('qrLinkModal'));
                 document.getElementById('qrLinkText').textContent = item.inventoryNumber;
                 document.getElementById('qrLinkHref').href = item.inventoryNumber;
                 modal.show();
                 toRemove.push(item);
             } else if (item.type === 'barcode') {
-                // Штрих-код: ищем в актуальных данных
                 const normalized = normalizeInventoryNumber(item.inventoryNumber);
                 const device = inventoryData.find(d => {
                     if (!d || !d.inventoryNumber) return false;
                     return normalizeInventoryNumber(d.inventoryNumber) === normalized;
                 });
                 if (device) {
-                    // Найден – удаляем из очереди и показываем карточку
                     showToast(`Устройство ${item.inventoryNumber} найдено в базе!`, 'success');
                     currentDevice = device;
                     showScreen('deviceCard');
                     renderDeviceCard(device);
                     toRemove.push(item);
                 } else {
-                    // Не найден – оставляем в очереди, позже предложим создать
+                    // Не найден – оставляем, но также можно показать уведомление
                     showToast(`Устройство ${item.inventoryNumber} не найдено. Создайте его вручную.`, 'warning');
-                    // Можно автоматически открыть модалку создания, но оставим пользователю выбор через логи
+                    // Можно не удалять, чтобы пользователь создал из логов
                 }
             }
         }
-        // Удаляем обработанные QR и найденные штрих-коды
         if (toRemove.length) {
             const remaining = pendingScans.filter(item => !toRemove.includes(item));
             localStorage.setItem('pendingScans', JSON.stringify(remaining));
@@ -721,7 +720,7 @@ async function syncPendingData() {
         renderLogs();
     }
 
-    // Синхронизируем действия (оставляем как было)
+    // Действия
     const pendingActions = JSON.parse(localStorage.getItem('pendingActions') || '[]');
     if (pendingActions.length) {
         const failed = [];
@@ -742,13 +741,12 @@ async function syncPendingData() {
         renderLogs();
     }
 
-    // Обновляем данные
     await loadInventory();
     updateDashboardStats();
 }
 
 // ============================
-// 11. МОДУЛЬ ЛОГОВ (с кнопкой "Создать")
+// 11. ЛОГИ
 // ============================
 
 function renderLogs() {
@@ -817,13 +815,12 @@ function renderLogs() {
     container.innerHTML = html;
 }
 
-// Глобальная функция для создания из лога
 window.createFromLog = function(inventoryNumber) {
     showCreateDeviceModal(inventoryNumber);
 };
 
 // ============================
-// 12. МОДАЛЬНОЕ ОКНО СОЗДАНИЯ УСТРОЙСТВА
+// 12. МОДАЛКА СОЗДАНИЯ УСТРОЙСТВА
 // ============================
 
 function showCreateDeviceModal(inventoryNumber) {
@@ -861,7 +858,6 @@ async function confirmCreateDevice() {
         pendingScans = pendingScans.filter(item => item.inventoryNumber !== inv);
         localStorage.setItem('pendingScans', JSON.stringify(pendingScans));
         renderLogs();
-        // Закрываем модалку
         bootstrap.Modal.getInstance(document.getElementById('createDeviceModal')).hide();
         // Ищем устройство в обновлённых данных
         const device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(inv));
@@ -871,12 +867,12 @@ async function confirmCreateDevice() {
             renderDeviceCard(device);
         }
     } catch (e) {
-        // ошибка уже показана в addDevice
+        // ошибка уже показана
     }
 }
 
 // ============================
-// 13. МОДУЛЬ ОТЧЁТА
+// 13. ОТЧЁТ
 // ============================
 
 function generateCSV(data) {
@@ -963,7 +959,7 @@ function printReport() {
 }
 
 // ============================
-// 14. НАСТРОЙКА ТЕМЫ И НАВИГАЦИИ (PILL)
+// 14. НАВИГАЦИЯ (PILL)
 // ============================
 
 let navButtons = [];
@@ -1286,11 +1282,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     });
 
-    // --- События для модалки создания ---
+    // --- События модалки создания ---
     document.getElementById('confirmCreateDevice')?.addEventListener('click', confirmCreateDevice);
-    // Закрытие модалки создания – очищаем поля (можно и не очищать)
 
-    // --- Автоматическая синхронизация при восстановлении сети ---
+    // --- Автосинхронизация при восстановлении сети ---
     window.addEventListener('online', function() {
         syncPendingData();
         loadInventory().then(() => {
@@ -1321,6 +1316,5 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     }, 120000);
 
-    // --- Показываем дашборд ---
     showScreen('dashboard');
 });
