@@ -1167,326 +1167,326 @@ function updateActivePill(smooth = true) {
 // 15. ИНИЦИАЛИЗАЦИЯ
 // ============================
 document.addEventListener('DOMContentLoaded', async function() {
-    // --- Firebase Auth ---
-    auth.onAuthStateChanged(async user => {
-        if (user) {
-            currentUser = user;
-            if (!user.displayName) {
-                const savedName = localStorage.getItem('localUserName');
-                if (savedName && savedName !== 'Аноним') {
-                    try {
-                        await user.updateProfile({ displayName: savedName });
-                        currentUser = user;
-                    } catch (e) { /* ignore */ }
-                } else {
-                    const name = prompt('Введите ваше имя (для отображения в истории):', user.uid.substring(0, 8));
-                    if (name) {
-                        await user.updateProfile({ displayName: name });
-                        localStorage.setItem('localUserName', name);
-                        currentUser = user;
-                    }
-                }
-            } else {
-                localStorage.setItem('localUserName', user.displayName);
-            }
-            document.getElementById('userDisplay').textContent = currentUser.displayName || currentUser.uid || 'Аноним';
-        } else {
-            try {
-                const cred = await auth.signInAnonymously();
-                currentUser = cred.user;
-                const savedName = localStorage.getItem('localUserName');
-                if (savedName && savedName !== 'Аноним') {
-                    try {
-                        await currentUser.updateProfile({ displayName: savedName });
-                    } catch (e) { /* ignore */ }
-                }
-                document.getElementById('userDisplay').textContent = currentUser.displayName || currentUser.uid || 'Аноним';
-            } catch (e) {
-                console.error('Ошибка анонимного входа:', e);
-                document.getElementById('userDisplay').textContent = localUserName;
-                showToast('Режим офлайн: изменения будут сохранены локально', 'warning');
-            }
+    // --- Принудительное скрытие загрузки через 10 секунд (защита от зависания) ---
+    const forceHideLoading = setTimeout(() => {
+        const loadingScreen = document.getElementById('loading-screen');
+        if (loadingScreen && !loadingScreen.classList.contains('hidden')) {
+            loadingScreen.classList.add('hidden');
+            const container = document.getElementById('appContainer');
+            if (container) container.style.display = 'block';
+            console.warn('Загрузка принудительно скрыта по таймауту');
         }
-    });
+    }, 10000);
 
-    // --- Загрузка данных ---
     try {
+        // --- Firebase Auth ---
+        await new Promise((resolve) => {
+            auth.onAuthStateChanged(async user => {
+                try {
+                    if (user) {
+                        currentUser = user;
+                        if (!user.displayName) {
+                            const savedName = localStorage.getItem('localUserName');
+                            if (savedName && savedName !== 'Аноним') {
+                                try {
+                                    await user.updateProfile({ displayName: savedName });
+                                    currentUser = user;
+                                } catch (e) { /* ignore */ }
+                            } else {
+                                const name = prompt('Введите ваше имя (для отображения в истории):', user.uid.substring(0, 8));
+                                if (name) {
+                                    await user.updateProfile({ displayName: name });
+                                    localStorage.setItem('localUserName', name);
+                                    currentUser = user;
+                                }
+                            }
+                        } else {
+                            localStorage.setItem('localUserName', user.displayName);
+                        }
+                        document.getElementById('userDisplay').textContent = currentUser.displayName || currentUser.uid || 'Аноним';
+                    } else {
+                        try {
+                            const cred = await auth.signInAnonymously();
+                            currentUser = cred.user;
+                            const savedName = localStorage.getItem('localUserName');
+                            if (savedName && savedName !== 'Аноним') {
+                                try {
+                                    await currentUser.updateProfile({ displayName: savedName });
+                                } catch (e) { /* ignore */ }
+                            }
+                            document.getElementById('userDisplay').textContent = currentUser.displayName || currentUser.uid || 'Аноним';
+                        } catch (e) {
+                            console.error('Ошибка анонимного входа:', e);
+                            document.getElementById('userDisplay').textContent = localUserName;
+                            showToast('Режим офлайн: изменения будут сохранены локально', 'warning');
+                        }
+                    }
+                } catch (e) {
+                    console.error('Ошибка в auth.onAuthStateChanged:', e);
+                } finally {
+                    resolve();
+                }
+            });
+        });
+
+        // --- Загрузка данных ---
         await loadInventory();
         updateDashboardStats();
         await loadCabinetSelect();
         await syncPendingData();
-    } catch (e) {
-        console.error('Ошибка инициализации:', e);
-        showToast('Ошибка загрузки данных. Проверьте интернет.', 'danger');
-    }
 
-    // --- Настройка темы ---
-    const themeToggle = document.getElementById('themeToggle');
-    const root = document.documentElement;
-    const savedTheme = localStorage.getItem('appTheme');
-    if (savedTheme) {
-        root.setAttribute('data-theme', savedTheme);
-    } else {
-        root.setAttribute('data-theme', 'light');
-    }
-    if (themeToggle) {
-        themeToggle.addEventListener('click', () => {
-            const current = root.getAttribute('data-theme');
-            const newTheme = current === 'dark' ? 'light' : 'dark';
-            root.setAttribute('data-theme', newTheme);
-            localStorage.setItem('appTheme', newTheme);
-            setTimeout(updateActivePill, 100);
+        // --- Настройка темы ---
+        const themeToggle = document.getElementById('themeToggle');
+        const root = document.documentElement;
+        const savedTheme = localStorage.getItem('appTheme');
+        if (savedTheme) {
+            root.setAttribute('data-theme', savedTheme);
+        } else {
+            root.setAttribute('data-theme', 'light');
+        }
+        if (themeToggle) {
+            themeToggle.addEventListener('click', () => {
+                const current = root.getAttribute('data-theme');
+                const newTheme = current === 'dark' ? 'light' : 'dark';
+                root.setAttribute('data-theme', newTheme);
+                localStorage.setItem('appTheme', newTheme);
+                setTimeout(updateActivePill, 100);
+            });
+        }
+
+        // --- Настройка навигации (pill) ---
+        activePill = document.getElementById('active-pill');
+        navButtons = document.querySelectorAll('.nav-btn');
+
+        navButtons.forEach(btn => {
+            btn.addEventListener('click', function() {
+                navButtons.forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                updateActivePill(true);
+                const screen = this.dataset.screen;
+                if (screen) showScreen(screen);
+            });
         });
-    }
 
-    // --- Настройка навигации (pill) ---
-    activePill = document.getElementById('active-pill');
-    navButtons = document.querySelectorAll('.nav-btn');
-
-    navButtons.forEach(btn => {
-        btn.addEventListener('click', function() {
-            navButtons.forEach(b => b.classList.remove('active'));
-            this.classList.add('active');
-            updateActivePill(true);
-            const screen = this.dataset.screen;
-            if (screen) showScreen(screen);
+        window.addEventListener('load', () => {
+            setTimeout(() => updateActivePill(false), 100);
         });
-    });
+        window.addEventListener('resize', () => updateActivePill(false));
 
-    window.addEventListener('load', () => {
-        setTimeout(() => updateActivePill(false), 100);
-    });
-    window.addEventListener('resize', () => updateActivePill(false));
+        // --- Обработчики кнопок ---
+        document.getElementById('scanBtn')?.addEventListener('click', () => showScreen('scanner'));
+        document.getElementById('checklistBtn')?.addEventListener('click', () => {
+            showScreen('checklist');
+            if (cabinetsData.length === 0) loadCabinetSelect();
+        });
+        document.getElementById('reportBtn')?.addEventListener('click', () => showScreen('report'));
 
-    // --- Обработчики кнопок ---
-    document.getElementById('scanBtn')?.addEventListener('click', () => showScreen('scanner'));
-    document.getElementById('checklistBtn')?.addEventListener('click', () => {
-        showScreen('checklist');
-        if (cabinetsData.length === 0) loadCabinetSelect();
-    });
-    document.getElementById('reportBtn')?.addEventListener('click', () => showScreen('report'));
+        document.getElementById('backFromScanner')?.addEventListener('click', () => {
+            stopScanner();
+            showScreen('dashboard');
+        });
+        document.getElementById('backFromDevice')?.addEventListener('click', () => {
+            currentDevice = null;
+            showScreen('dashboard');
+        });
+        document.getElementById('backFromChecklist')?.addEventListener('click', () => showScreen('dashboard'));
+        document.getElementById('backFromReport')?.addEventListener('click', () => showScreen('dashboard'));
+        document.getElementById('backFromLogs')?.addEventListener('click', () => showScreen('dashboard'));
 
-    document.getElementById('backFromScanner')?.addEventListener('click', () => {
-        stopScanner();
-        showScreen('dashboard');
-    });
-    document.getElementById('backFromDevice')?.addEventListener('click', () => {
-        currentDevice = null;
-        showScreen('dashboard');
-    });
-    document.getElementById('backFromChecklist')?.addEventListener('click', () => showScreen('dashboard'));
-    document.getElementById('backFromReport')?.addEventListener('click', () => showScreen('dashboard'));
-    document.getElementById('backFromLogs')?.addEventListener('click', () => showScreen('dashboard'));
+        document.getElementById('manualFindBtn')?.addEventListener('click', handleManualFind);
+        document.getElementById('manualInvInput')?.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') handleManualFind();
+        });
 
-    document.getElementById('manualFindBtn')?.addEventListener('click', handleManualFind);
-    document.getElementById('manualInvInput')?.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') handleManualFind();
-    });
+        document.getElementById('refreshDataBtn')?.addEventListener('click', async function() {
+            try {
+                await loadInventory();
+                updateDashboardStats();
+                if (currentDevice) {
+                    const updated = inventoryData.find(d => d && d.inventoryNumber === currentDevice.inventoryNumber);
+                    if (updated) {
+                        currentDevice = updated;
+                        renderDeviceCard(updated);
+                    }
+                }
+                showToast('Данные обновлены', 'success');
+            } catch (e) {
+                showToast('Ошибка обновления', 'danger');
+            }
+        });
 
-    document.getElementById('refreshDataBtn')?.addEventListener('click', async function() {
-        try {
-            await loadInventory();
-            updateDashboardStats();
-            if (currentDevice) {
-                const updated = inventoryData.find(d => d && d.inventoryNumber === currentDevice.inventoryNumber);
-                if (updated) {
-                    currentDevice = updated;
-                    renderDeviceCard(updated);
+        document.getElementById('changeNameBtn')?.addEventListener('click', function() {
+            const newName = prompt('Введите ваше имя (для отображения в истории):', localUserName);
+            if (newName && newName.trim()) {
+                const name = newName.trim();
+                localStorage.setItem('localUserName', name);
+                localUserName = name;
+                if (currentUser) {
+                    currentUser.updateProfile({ displayName: name }).catch(() => {});
+                }
+                document.getElementById('userDisplay').textContent = name;
+                showToast('Имя обновлено', 'success');
+            }
+        });
+
+        // --- Карточка: редактирование ---
+        document.getElementById('editBtn')?.addEventListener('click', function() {
+            if (!currentDevice) {
+                showToast('Устройство не выбрано', 'warning');
+                return;
+            }
+            document.getElementById('editModel').value = currentDevice.model || '';
+            document.getElementById('editSerial').value = currentDevice.serialNumber || '';
+            document.getElementById('editResponsible').value = currentDevice.responsiblePerson || '';
+            document.getElementById('editWarranty').value = currentDevice.warrantyEndDate || '';
+            document.getElementById('editStatus').value = currentDevice.status || 'В эксплуатации';
+            const modal = new bootstrap.Modal(document.getElementById('editModal'));
+            modal.show();
+        });
+
+        document.getElementById('confirmEdit')?.addEventListener('click', async function() {
+            const model = document.getElementById('editModel').value.trim();
+            const serial = document.getElementById('editSerial').value.trim();
+            const responsible = document.getElementById('editResponsible').value.trim();
+            const warranty = document.getElementById('editWarranty').value.trim();
+            const status = document.getElementById('editStatus').value;
+            if (warranty && !/^\d{2}\.\d{2}\.\d{4}$/.test(warranty)) {
+                showToast('Неверный формат даты (ДД.ММ.ГГГГ)', 'danger');
+                return;
+            }
+            const updates = { model, serialNumber: serial, responsiblePerson: responsible, warrantyEndDate: warranty, status };
+            const modal = bootstrap.Modal.getInstance(document.getElementById('editModal'));
+            if (modal) modal.hide();
+            await performDeviceAction('edit', updates);
+        });
+
+        // --- Карточка: передача ---
+        document.getElementById('transferBtn')?.addEventListener('click', function() {
+            if (!currentDevice) {
+                showToast('Устройство не выбрано', 'warning');
+                return;
+            }
+            const modal = new bootstrap.Modal(document.getElementById('transferModal'));
+            modal.show();
+        });
+        document.getElementById('confirmTransfer')?.addEventListener('click', async function() {
+            const fio = document.getElementById('transferFio')?.value.trim();
+            const comment = document.getElementById('transferComment')?.value.trim();
+            if (!fio || !comment) {
+                showToast('Заполните все поля', 'warning');
+                return;
+            }
+            const modal = bootstrap.Modal.getInstance(document.getElementById('transferModal'));
+            if (modal) modal.hide();
+            await performDeviceAction('transfer', { fio, comment });
+            document.getElementById('transferFio').value = '';
+            document.getElementById('transferComment').value = '';
+        });
+
+        // --- Карточка: ремонт ---
+        document.getElementById('repairBtn')?.addEventListener('click', async function() {
+            if (!currentDevice) {
+                showToast('Устройство не выбрано', 'warning');
+                return;
+            }
+            const comment = prompt('Введите причину отправки в ремонт (необязательно):');
+            await performDeviceAction('repair', { comment: comment || 'Без комментария' });
+        });
+
+        // --- Карточка: склад ---
+        document.getElementById('stockBtn')?.addEventListener('click', async function() {
+            if (!currentDevice) {
+                showToast('Устройство не выбрано', 'warning');
+                return;
+            }
+            const comment = prompt('Введите комментарий (необязательно):');
+            await performDeviceAction('stock', { comment: comment || 'Без комментария' });
+        });
+
+        // --- Карточка: списание ---
+        document.getElementById('scrapBtn')?.addEventListener('click', function() {
+            if (!currentDevice) {
+                showToast('Устройство не выбрано', 'warning');
+                return;
+            }
+            document.getElementById('scrapInventory').textContent = currentDevice.inventoryNumber;
+            const modal = new bootstrap.Modal(document.getElementById('scrapModal'));
+            modal.show();
+        });
+        document.getElementById('confirmScrap')?.addEventListener('click', async function() {
+            const comment = document.getElementById('scrapComment')?.value.trim();
+            const modal = bootstrap.Modal.getInstance(document.getElementById('scrapModal'));
+            if (modal) modal.hide();
+            await performDeviceAction('scrap', { comment: comment || 'Причина не указана' });
+            document.getElementById('scrapComment').value = '';
+        });
+
+        // --- Оборотная ведомость ---
+        document.getElementById('cabinetSelect')?.addEventListener('change', function() {
+            const cabinet = this.value;
+            if (cabinet) {
+                renderChecklist(cabinet);
+            } else {
+                document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Выберите кабинет</div>';
+                document.getElementById('progressText').textContent = '0 из 0';
+                document.getElementById('progressBar').style.width = '0%';
+                document.getElementById('progressBar').textContent = '0%';
+            }
+        });
+        document.getElementById('refreshChecklistBtn')?.addEventListener('click', function() {
+            const cabinet = document.getElementById('cabinetSelect')?.value;
+            if (cabinet) {
+                renderChecklist(cabinet);
+                showToast('Обновлено', 'success');
+            }
+        });
+
+        // --- Отчёт ---
+        document.getElementById('downloadCsvBtn')?.addEventListener('click', function() {
+            const cabinetFilter = document.getElementById('reportCabinetFilter')?.value;
+            let filteredData = inventoryData;
+            if (cabinetFilter) {
+                const cabinet = cabinetsData.find(c => c && c.cabinet === cabinetFilter);
+                if (cabinet && Array.isArray(cabinet.inventoryNumbers)) {
+                    const normList = cabinet.inventoryNumbers.map(n => normalizeInventoryNumber(n));
+                    filteredData = inventoryData.filter(d => normList.includes(normalizeInventoryNumber(d.inventoryNumber)));
                 }
             }
-            showToast('Данные обновлены', 'success');
-        } catch (e) {
-            showToast('Ошибка обновления', 'danger');
-        }
-    });
-
-    document.getElementById('changeNameBtn')?.addEventListener('click', function() {
-        const newName = prompt('Введите ваше имя (для отображения в истории):', localUserName);
-        if (newName && newName.trim()) {
-            const name = newName.trim();
-            localStorage.setItem('localUserName', name);
-            localUserName = name;
-            if (currentUser) {
-                currentUser.updateProfile({ displayName: name }).catch(() => {});
+            const csv = generateCSV(filteredData);
+            if (csv) {
+                downloadCSV(csv);
+            } else {
+                showToast('Нет данных для выгрузки', 'warning');
             }
-            document.getElementById('userDisplay').textContent = name;
-            showToast('Имя обновлено', 'success');
-        }
-    });
+        });
+        document.getElementById('printPdfBtn')?.addEventListener('click', printReport);
 
-    // --- Карточка: редактирование ---
-    document.getElementById('editBtn')?.addEventListener('click', function() {
-        if (!currentDevice) {
-            showToast('Устройство не выбрано', 'warning');
-            return;
-        }
-        document.getElementById('editModel').value = currentDevice.model || '';
-        document.getElementById('editSerial').value = currentDevice.serialNumber || '';
-        document.getElementById('editResponsible').value = currentDevice.responsiblePerson || '';
-        document.getElementById('editWarranty').value = currentDevice.warrantyEndDate || '';
-        document.getElementById('editStatus').value = currentDevice.status || 'В эксплуатации';
-        const modal = new bootstrap.Modal(document.getElementById('editModal'));
-        modal.show();
-    });
+        // --- Помощь ---
+        document.getElementById('helpBtn')?.addEventListener('click', function() {
+            const modal = new bootstrap.Modal(document.getElementById('helpModal'));
+            modal.show();
+        });
 
-    document.getElementById('confirmEdit')?.addEventListener('click', async function() {
-        const model = document.getElementById('editModel').value.trim();
-        const serial = document.getElementById('editSerial').value.trim();
-        const responsible = document.getElementById('editResponsible').value.trim();
-        const warranty = document.getElementById('editWarranty').value.trim();
-        const status = document.getElementById('editStatus').value;
-        if (warranty && !/^\d{2}\.\d{2}\.\d{4}$/.test(warranty)) {
-            showToast('Неверный формат даты (ДД.ММ.ГГГГ)', 'danger');
-            return;
-        }
-        const updates = { model, serialNumber: serial, responsiblePerson: responsible, warrantyEndDate: warranty, status };
-        const modal = bootstrap.Modal.getInstance(document.getElementById('editModal'));
-        if (modal) modal.hide();
-        await performDeviceAction('edit', updates);
-    });
-
-    // --- Карточка: передача ---
-    document.getElementById('transferBtn')?.addEventListener('click', function() {
-        if (!currentDevice) {
-            showToast('Устройство не выбрано', 'warning');
-            return;
-        }
-        const modal = new bootstrap.Modal(document.getElementById('transferModal'));
-        modal.show();
-    });
-    document.getElementById('confirmTransfer')?.addEventListener('click', async function() {
-        const fio = document.getElementById('transferFio')?.value.trim();
-        const comment = document.getElementById('transferComment')?.value.trim();
-        if (!fio || !comment) {
-            showToast('Заполните все поля', 'warning');
-            return;
-        }
-        const modal = bootstrap.Modal.getInstance(document.getElementById('transferModal'));
-        if (modal) modal.hide();
-        await performDeviceAction('transfer', { fio, comment });
-        document.getElementById('transferFio').value = '';
-        document.getElementById('transferComment').value = '';
-    });
-
-    // --- Карточка: ремонт ---
-    document.getElementById('repairBtn')?.addEventListener('click', async function() {
-        if (!currentDevice) {
-            showToast('Устройство не выбрано', 'warning');
-            return;
-        }
-        const comment = prompt('Введите причину отправки в ремонт (необязательно):');
-        await performDeviceAction('repair', { comment: comment || 'Без комментария' });
-    });
-
-    // --- Карточка: склад ---
-    document.getElementById('stockBtn')?.addEventListener('click', async function() {
-        if (!currentDevice) {
-            showToast('Устройство не выбрано', 'warning');
-            return;
-        }
-        const comment = prompt('Введите комментарий (необязательно):');
-        await performDeviceAction('stock', { comment: comment || 'Без комментария' });
-    });
-
-    // --- Карточка: списание ---
-    document.getElementById('scrapBtn')?.addEventListener('click', function() {
-        if (!currentDevice) {
-            showToast('Устройство не выбрано', 'warning');
-            return;
-        }
-        document.getElementById('scrapInventory').textContent = currentDevice.inventoryNumber;
-        const modal = new bootstrap.Modal(document.getElementById('scrapModal'));
-        modal.show();
-    });
-    document.getElementById('confirmScrap')?.addEventListener('click', async function() {
-        const comment = document.getElementById('scrapComment')?.value.trim();
-        const modal = bootstrap.Modal.getInstance(document.getElementById('scrapModal'));
-        if (modal) modal.hide();
-        await performDeviceAction('scrap', { comment: comment || 'Причина не указана' });
-        document.getElementById('scrapComment').value = '';
-    });
-
-    // --- Оборотная ведомость ---
-    document.getElementById('cabinetSelect')?.addEventListener('change', function() {
-        const cabinet = this.value;
-        if (cabinet) {
-            renderChecklist(cabinet);
-        } else {
-            document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Выберите кабинет</div>';
-            document.getElementById('progressText').textContent = '0 из 0';
-            document.getElementById('progressBar').style.width = '0%';
-            document.getElementById('progressBar').textContent = '0%';
-        }
-    });
-    document.getElementById('refreshChecklistBtn')?.addEventListener('click', function() {
-        const cabinet = document.getElementById('cabinetSelect')?.value;
-        if (cabinet) {
-            renderChecklist(cabinet);
-            showToast('Обновлено', 'success');
-        }
-    });
-
-    // --- Отчёт ---
-    document.getElementById('downloadCsvBtn')?.addEventListener('click', function() {
-        const cabinetFilter = document.getElementById('reportCabinetFilter')?.value;
-        let filteredData = inventoryData;
-        if (cabinetFilter) {
-            const cabinet = cabinetsData.find(c => c && c.cabinet === cabinetFilter);
-            if (cabinet && Array.isArray(cabinet.inventoryNumbers)) {
-                const normList = cabinet.inventoryNumbers.map(n => normalizeInventoryNumber(n));
-                filteredData = inventoryData.filter(d => normList.includes(normalizeInventoryNumber(d.inventoryNumber)));
-            }
-        }
-        const csv = generateCSV(filteredData);
-        if (csv) {
-            downloadCSV(csv);
-        } else {
-            showToast('Нет данных для выгрузки', 'warning');
-        }
-    });
-    document.getElementById('printPdfBtn')?.addEventListener('click', printReport);
-
-    // --- Помощь ---
-    document.getElementById('helpBtn')?.addEventListener('click', function() {
-        const modal = new bootstrap.Modal(document.getElementById('helpModal'));
-        modal.show();
-    });
-
-    // --- Логи ---
-    document.getElementById('syncNowBtn')?.addEventListener('click', async function() {
-        await syncPendingData();
-        renderLogs();
-    });
-    document.getElementById('clearLogsBtn')?.addEventListener('click', function() {
-        if (confirm('Вы уверены, что хотите очистить все отложенные операции без синхронизации?')) {
-            localStorage.removeItem('pendingScans');
-            localStorage.removeItem('pendingActions');
+        // --- Логи ---
+        document.getElementById('syncNowBtn')?.addEventListener('click', async function() {
+            await syncPendingData();
             renderLogs();
-            showToast('Логи очищены', 'info');
-        }
-    });
-
-    // --- События модалки создания ---
-    document.getElementById('confirmCreateDevice')?.addEventListener('click', confirmCreateDevice);
-
-    // --- Автосинхронизация при восстановлении сети ---
-    window.addEventListener('online', function() {
-        syncPendingData();
-        loadInventory().then(() => {
-            updateDashboardStats();
-            if (currentDevice) {
-                const updated = inventoryData.find(d => d && d.inventoryNumber === currentDevice.inventoryNumber);
-                if (updated) {
-                    currentDevice = updated;
-                    renderDeviceCard(updated);
-                }
+        });
+        document.getElementById('clearLogsBtn')?.addEventListener('click', function() {
+            if (confirm('Вы уверены, что хотите очистить все отложенные операции без синхронизации?')) {
+                localStorage.removeItem('pendingScans');
+                localStorage.removeItem('pendingActions');
+                renderLogs();
+                showToast('Логи очищены', 'info');
             }
         });
-    });
 
-    // --- Периодическая проверка (каждые 2 минуты) ---
-    setInterval(() => {
-        if (navigator.onLine) {
+        // --- События модалки создания ---
+        document.getElementById('confirmCreateDevice')?.addEventListener('click', confirmCreateDevice);
+
+        // --- Автосинхронизация при восстановлении сети ---
+        window.addEventListener('online', function() {
+            syncPendingData();
             loadInventory().then(() => {
                 updateDashboardStats();
                 if (currentDevice) {
@@ -1497,21 +1497,42 @@ document.addEventListener('DOMContentLoaded', async function() {
                     }
                 }
             });
-        }
-    }, 120000);
+        });
 
-    // --- Показываем дашборд ---
-    showScreen('dashboard');
+        // --- Периодическая проверка (каждые 2 минуты) ---
+        setInterval(() => {
+            if (navigator.onLine) {
+                loadInventory().then(() => {
+                    updateDashboardStats();
+                    if (currentDevice) {
+                        const updated = inventoryData.find(d => d && d.inventoryNumber === currentDevice.inventoryNumber);
+                        if (updated) {
+                            currentDevice = updated;
+                            renderDeviceCard(updated);
+                        }
+                    }
+                });
+            }
+        }, 120000);
 
-    // ============================================================
-    // Скрываем экран загрузки после полной инициализации
-    // ============================================================
-    const loadingScreen = document.getElementById('loading-screen');
-    if (loadingScreen) {
-        // Небольшая задержка для плавности
-        setTimeout(() => {
+        // --- Показываем дашборд ---
+        showScreen('dashboard');
+
+    } catch (error) {
+        console.error('Критическая ошибка инициализации:', error);
+        showToast('Ошибка загрузки приложения: ' + error.message, 'danger');
+    } finally {
+        // --- Скрываем экран загрузки (гарантированно) ---
+        clearTimeout(forceHideLoading);
+        const loadingScreen = document.getElementById('loading-screen');
+        if (loadingScreen) {
             loadingScreen.classList.add('hidden');
-            document.getElementById('appContainer').style.display = 'block';
-        }, 400);
+        }
+        const container = document.getElementById('appContainer');
+        if (container) {
+            container.style.display = 'block';
+        } else {
+            console.warn('Элемент #appContainer не найден, но загрузка скрыта');
+        }
     }
 });
