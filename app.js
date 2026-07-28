@@ -1,9 +1,9 @@
 /**
  * app.js – Исправленная версия
- * - Исправлена ошибка trim is not a function (приведение к строке)
- * - QR-коды корректно обрабатываются (даже без URL)
- * - Защита от дублирования при создании устройств
- * - После создания обновляются данные и статистика
+ * - QR-код со ссылкой теперь показывает диалог перехода
+ * - После создания устройства сразу обновляется локальный список (без повторного запроса)
+ * - Устранено дублирование записей при повторных сканированиях
+ * - Оптимизирована производительность (меньше лишних вызовов loadInventory)
  */
 
 // ============================
@@ -25,7 +25,7 @@ const auth = firebase.auth();
 // ============================
 // 1. КОНФИГУРАЦИЯ ПРОКСИ (ЗАМЕНИТЕ ПОСЛЕ ПЕРЕРАЗВЁРТЫВАНИЯ)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbyFC3CZ9NDvThHETkgcExhsYHaGS2WEXKN2UAdzGFRPPf-pT3n-CUzCTqqqpLA8M9HU/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbw2tAfEF00R3jkVpI1l-9G_mkBuLyVBmvEQ6-PYpLTL6ps8Y18jTSzp0IW-opV7pmY/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -41,7 +41,7 @@ let localUserName = localStorage.getItem('localUserName') || 'Аноним';
 let isCreating = false;
 
 // ============================
-// 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (с приведением к строке)
+// 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 // ============================
 function showToast(message, type = 'success') {
     const toastEl = document.getElementById('liveToast');
@@ -197,7 +197,6 @@ async function callProxy(action, payload = {}) {
 async function loadInventory() {
     try {
         const result = await callProxy('read');
-        // Приводим инвентарные номера к строке перед trim
         inventoryData = Array.isArray(result.inventory) ? result.inventory.map(d => {
             if (d && d.inventoryNumber !== undefined && d.inventoryNumber !== null) {
                 d.inventoryNumber = String(d.inventoryNumber).trim();
@@ -261,8 +260,9 @@ async function addDevice(deviceData) {
         throw new Error('Invalid inventory number');
     }
 
-    // Проверяем локально (после последней загрузки)
-    const existing = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(inventoryNumber));
+    // Проверяем локально
+    const normalized = normalizeInventoryNumber(inventoryNumber);
+    const existing = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
     if (existing) {
         showToast('Устройство с таким номером уже существует в базе', 'warning');
         throw new Error('Duplicate');
@@ -274,10 +274,24 @@ async function addDevice(deviceData) {
             initiator: getInitiatorName()
         });
         showToast(result.message || 'Устройство создано', 'success');
-        // Обязательно перезагружаем данные с сервера
-        await loadInventory();
-        // Обновляем статистику на дашборде
+        
+        // Добавляем новое устройство в локальный список, чтобы избежать дублирования при повторных сканированиях
+        const now = new Date().toLocaleString('ru-RU');
+        const newDevice = {
+            inventoryNumber: inventoryNumber,
+            model: model || '',
+            serialNumber: serialNumber || '',
+            status: status || 'В эксплуатации',
+            responsiblePerson: responsiblePerson || '',
+            warrantyEndDate: warrantyEndDate || '',
+            history: `${now} Создано (${getInitiatorName()})`,
+            lastModified: now,
+            initiator: getInitiatorName()
+        };
+        inventoryData.push(newDevice);
+        localStorage.setItem('inventoryCache', JSON.stringify(inventoryData));
         updateDashboardStats();
+        
         return result;
     } catch (error) {
         if (error.message && (error.message.includes('уже существует') || error.message.includes('Duplicate'))) {
@@ -306,7 +320,7 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 6. СКАНЕР – КОРРЕКТНАЯ ОБРАБОТКА QR И ШТРИХ-КОДОВ
+// 6. СКАНЕР – ОБРАБОТКА QR И ШТРИХ-КОДОВ
 // ============================
 async function initScanner() {
     if (isInitializingScanner) return;
@@ -368,37 +382,33 @@ function onScanSuccess(decodedText, decodedResult) {
     playBeep(true);
     stopScanner();
 
+    const rawText = decodedText.trim();
     let format = decodedResult?.result?.format || decodedResult?.format || '';
     console.log('Формат:', format);
 
-    const rawText = decodedText.trim();
-
-    // --- ОБРАБОТКА QR-КОДА ---
-    if (format === 'QR_CODE' || format === 'QR') {
-        console.log('Обнаружен QR-код');
-        if (rawText.startsWith('http://') || rawText.startsWith('https://')) {
-            if (navigator.onLine) {
-                const modal = new bootstrap.Modal(document.getElementById('qrLinkModal'));
-                document.getElementById('qrLinkText').textContent = rawText;
-                document.getElementById('qrLinkHref').href = rawText;
-                modal.show();
-            } else {
-                savePendingScan(rawText, 'qr');
-                showToast('QR-код сохранён в журнале (офлайн).', 'warning');
-                setTimeout(() => {
-                    if (document.getElementById('scanner').classList.contains('active')) initScanner();
-                }, 1500);
-            }
-            return;
+    // --- Если содержимое начинается с http – это ссылка (QR-код) ---
+    if (rawText.startsWith('http://') || rawText.startsWith('https://')) {
+        console.log('Обнаружена ссылка (QR-код)');
+        if (navigator.onLine) {
+            const modal = new bootstrap.Modal(document.getElementById('qrLinkModal'));
+            document.getElementById('qrLinkText').textContent = rawText;
+            document.getElementById('qrLinkHref').href = rawText;
+            modal.show();
+        } else {
+            savePendingScan(rawText, 'qr');
+            showToast('QR-код сохранён в журнале (офлайн).', 'warning');
+            setTimeout(() => {
+                if (document.getElementById('scanner').classList.contains('active')) initScanner();
+            }, 1500);
         }
+        return;
+    }
 
-        // QR без URL – ищем устройство
+    // --- Если это QR-код, но не ссылка ---
+    if (format === 'QR_CODE' || format === 'QR') {
+        console.log('Обнаружен QR-код (не ссылка)');
         const normalized = normalizeInventoryNumber(rawText);
-        console.log('Ищем устройство по QR-коду (не URL):', normalized);
-        const device = inventoryData.find(d => {
-            if (!d || !d.inventoryNumber) return false;
-            return normalizeInventoryNumber(d.inventoryNumber) === normalized;
-        });
+        const device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
         if (device) {
             currentDevice = device;
             showScreen('deviceCard');
@@ -406,14 +416,6 @@ function onScanSuccess(decodedText, decodedResult) {
             return;
         } else {
             if (navigator.onLine) {
-                // Повторная проверка на случай, если данные обновились
-                const updatedDevice = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
-                if (updatedDevice) {
-                    currentDevice = updatedDevice;
-                    showScreen('deviceCard');
-                    renderDeviceCard(updatedDevice);
-                    return;
-                }
                 showCreateDeviceModal(rawText);
             } else {
                 savePendingScan(rawText, 'barcode');
@@ -426,16 +428,10 @@ function onScanSuccess(decodedText, decodedResult) {
         }
     }
 
-    // --- ОБРАБОТКА ШТРИХ-КОДА (или обычного номера) ---
+    // --- Остальное – штрих-код или обычный номер ---
     console.log('Обнаружен штрих-код (или обычный номер)');
     const normalized = normalizeInventoryNumber(rawText);
-    console.log('Ищем устройство по номеру:', normalized);
-
-    const device = inventoryData.find(d => {
-        if (!d || !d.inventoryNumber) return false;
-        return normalizeInventoryNumber(d.inventoryNumber) === normalized;
-    });
-
+    const device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
     if (device) {
         currentDevice = device;
         showScreen('deviceCard');
@@ -445,13 +441,6 @@ function onScanSuccess(decodedText, decodedResult) {
 
     // Не найден
     if (navigator.onLine) {
-        const updatedDevice = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
-        if (updatedDevice) {
-            currentDevice = updatedDevice;
-            showScreen('deviceCard');
-            renderDeviceCard(updatedDevice);
-            return;
-        }
         showCreateDeviceModal(rawText);
     } else {
         savePendingScan(rawText, 'barcode');
@@ -479,10 +468,7 @@ function handleManualFind() {
         return;
     }
     const normalized = normalizeInventoryNumber(rawValue);
-    const device = inventoryData.find(d => {
-        if (!d || !d.inventoryNumber) return false;
-        return normalizeInventoryNumber(d.inventoryNumber) === normalized;
-    });
+    const device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
     if (device) {
         currentDevice = device;
         showScreen('deviceCard');
@@ -620,6 +606,7 @@ async function performDeviceAction(action, data = {}) {
             currentDevice = updated;
             renderDeviceCard(updated);
         } else {
+            // Если не нашли в локальном списке – перезагрузим
             await loadInventory();
             const reloaded = inventoryData.find(d => d && d.inventoryNumber === inv);
             if (reloaded) {
@@ -680,10 +667,7 @@ function renderChecklist(cabinetName) {
 
     invNumbers.forEach(num => {
         const normalizedNum = normalizeInventoryNumber(num);
-        const exists = inventoryData.some(d => {
-            if (!d || !d.inventoryNumber) return false;
-            return normalizeInventoryNumber(d.inventoryNumber) === normalizedNum && d.status !== 'Списан';
-        });
+        const exists = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalizedNum && d.status !== 'Списан');
         if (exists) found++;
         const statusClass = exists ? 'list-group-item-success' : 'list-group-item-danger';
         const statusText = exists ? '✓ Найдено' : '✗ Не найдено';
@@ -754,10 +738,7 @@ async function syncPendingData() {
                 toRemove.push(item);
             } else if (item.type === 'barcode') {
                 const normalized = normalizeInventoryNumber(item.inventoryNumber);
-                const device = inventoryData.find(d => {
-                    if (!d || !d.inventoryNumber) return false;
-                    return normalizeInventoryNumber(d.inventoryNumber) === normalized;
-                });
+                const device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
                 if (device) {
                     showToast(`Устройство ${item.inventoryNumber} найдено в базе!`, 'success');
                     currentDevice = device;
@@ -910,9 +891,18 @@ async function confirmCreateDevice() {
         return;
     }
 
+    // Проверяем локально (уже может существовать, если было создано ранее)
     const exists = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(inv));
     if (exists) {
         showToast('Устройство с таким номером уже существует', 'warning');
+        // Закрываем модалку и показываем карточку, если есть
+        const device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(inv));
+        if (device) {
+            bootstrap.Modal.getInstance(document.getElementById('createDeviceModal')).hide();
+            currentDevice = device;
+            showScreen('deviceCard');
+            renderDeviceCard(device);
+        }
         return;
     }
 
@@ -927,13 +917,18 @@ async function confirmCreateDevice() {
 
         await addDevice({ inventoryNumber: inv, model, serialNumber: serial, status, responsiblePerson: responsible, warrantyEndDate: warranty });
 
+        // После создания обновляем локальный список уже в addDevice, но дополнительно загружаем с сервера для синхронизации
+        // (но необязательно, т.к. мы уже добавили локально)
+        // Однако чтобы получить актуальные данные (например, ID), можно перезагрузить, но это долго.
+        // Для скорости оставляем локальное добавление.
+
+        // Удаляем из очереди сканирований, если есть
         let pendingScans = JSON.parse(localStorage.getItem('pendingScans') || '[]');
         pendingScans = pendingScans.filter(item => item.inventoryNumber !== inv);
         localStorage.setItem('pendingScans', JSON.stringify(pendingScans));
         renderLogs();
 
-        await loadInventory();
-        updateDashboardStats();
+        // Показываем карточку созданного устройства
         const device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(inv));
         if (device) {
             currentDevice = device;
@@ -944,6 +939,15 @@ async function confirmCreateDevice() {
         }
     } catch (e) {
         console.error('Ошибка создания:', e);
+        // Если ошибка "уже существует", возможно, устройство уже создано параллельно – попробуем найти
+        if (e.message && e.message.includes('уже существует')) {
+            const device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(inv));
+            if (device) {
+                currentDevice = device;
+                showScreen('deviceCard');
+                renderDeviceCard(device);
+            }
+        }
     } finally {
         isCreating = false;
         btn.disabled = false;
@@ -952,7 +956,7 @@ async function confirmCreateDevice() {
 }
 
 // ============================
-// 13. ОТЧЁТ
+// 13. ОТЧЁТ (без изменений)
 // ============================
 function generateCSV(data) {
     if (!data || !Array.isArray(data) || data.length === 0) return '';
@@ -1060,6 +1064,7 @@ function updateActivePill(smooth = true) {
 // 15. ИНИЦИАЛИЗАЦИЯ
 // ============================
 document.addEventListener('DOMContentLoaded', async function() {
+    // --- Firebase Auth ---
     auth.onAuthStateChanged(async user => {
         if (user) {
             currentUser = user;
@@ -1101,6 +1106,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     });
 
+    // --- Загрузка данных ---
     try {
         await loadInventory();
         updateDashboardStats();
@@ -1111,6 +1117,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         showToast('Ошибка загрузки данных. Проверьте интернет.', 'danger');
     }
 
+    // --- Настройка темы ---
     const themeToggle = document.getElementById('themeToggle');
     const root = document.documentElement;
     const savedTheme = localStorage.getItem('appTheme');
@@ -1129,6 +1136,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
     }
 
+    // --- Настройка навигации (pill) ---
     activePill = document.getElementById('active-pill');
     navButtons = document.querySelectorAll('.nav-btn');
 
@@ -1147,6 +1155,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     });
     window.addEventListener('resize', () => updateActivePill(false));
 
+    // --- Обработчики кнопок ---
     document.getElementById('scanBtn')?.addEventListener('click', () => showScreen('scanner'));
     document.getElementById('checklistBtn')?.addEventListener('click', () => {
         showScreen('checklist');
@@ -1202,6 +1211,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     });
 
+    // --- Карточка: редактирование ---
     document.getElementById('editBtn')?.addEventListener('click', function() {
         if (!currentDevice) {
             showToast('Устройство не выбрано', 'warning');
@@ -1232,6 +1242,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         await performDeviceAction('edit', updates);
     });
 
+    // --- Карточка: передача ---
     document.getElementById('transferBtn')?.addEventListener('click', function() {
         if (!currentDevice) {
             showToast('Устройство не выбрано', 'warning');
@@ -1254,6 +1265,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         document.getElementById('transferComment').value = '';
     });
 
+    // --- Карточка: ремонт ---
     document.getElementById('repairBtn')?.addEventListener('click', async function() {
         if (!currentDevice) {
             showToast('Устройство не выбрано', 'warning');
@@ -1263,6 +1275,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         await performDeviceAction('repair', { comment: comment || 'Без комментария' });
     });
 
+    // --- Карточка: склад ---
     document.getElementById('stockBtn')?.addEventListener('click', async function() {
         if (!currentDevice) {
             showToast('Устройство не выбрано', 'warning');
@@ -1272,6 +1285,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         await performDeviceAction('stock', { comment: comment || 'Без комментария' });
     });
 
+    // --- Карточка: списание ---
     document.getElementById('scrapBtn')?.addEventListener('click', function() {
         if (!currentDevice) {
             showToast('Устройство не выбрано', 'warning');
@@ -1289,6 +1303,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         document.getElementById('scrapComment').value = '';
     });
 
+    // --- Оборотная ведомость ---
     document.getElementById('cabinetSelect')?.addEventListener('change', function() {
         const cabinet = this.value;
         if (cabinet) {
@@ -1308,6 +1323,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     });
 
+    // --- Отчёт ---
     document.getElementById('downloadCsvBtn')?.addEventListener('click', function() {
         const cabinetFilter = document.getElementById('reportCabinetFilter')?.value;
         let filteredData = inventoryData;
@@ -1327,11 +1343,13 @@ document.addEventListener('DOMContentLoaded', async function() {
     });
     document.getElementById('printPdfBtn')?.addEventListener('click', printReport);
 
+    // --- Помощь ---
     document.getElementById('helpBtn')?.addEventListener('click', function() {
         const modal = new bootstrap.Modal(document.getElementById('helpModal'));
         modal.show();
     });
 
+    // --- Логи ---
     document.getElementById('syncNowBtn')?.addEventListener('click', async function() {
         await syncPendingData();
         renderLogs();
@@ -1345,8 +1363,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     });
 
+    // --- События модалки создания ---
     document.getElementById('confirmCreateDevice')?.addEventListener('click', confirmCreateDevice);
 
+    // --- Автосинхронизация при восстановлении сети ---
     window.addEventListener('online', function() {
         syncPendingData();
         loadInventory().then(() => {
@@ -1361,6 +1381,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
     });
 
+    // --- Периодическая проверка (каждые 2 минуты) ---
     setInterval(() => {
         if (navigator.onLine) {
             loadInventory().then(() => {
