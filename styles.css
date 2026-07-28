@@ -90,7 +90,6 @@
 }
 
 /* ===== ЭКРАН ЗАГРУЗКИ ===== */
-/* ИЗМЕНЕНО: прозрачный фон, цвет текста совпадает с лоадером */
 .loading-overlay {
     position: fixed;
     top: 0;
@@ -112,8 +111,26 @@
 .loading-content {
     text-align: center;
 }
-.loading-content .fw-bold {
-    color: var(--blob-1);   /* цвет совпадает с лоадером */
+.loading-main-text {
+    font-weight: 700;
+    /* цвет по умолчанию – тёмный (для светлой темы) */
+    color: #222;
+    transition: color 0.5s ease;
+}
+.loading-sub-text {
+    font-size: 0.9rem;
+    transition: color 0.5s ease;
+}
+/* Светлая тема (по умолчанию) – подзаголовок ярко-голубой */
+.loading-sub-text {
+    color: var(--blob-1); /* #00f2fe */
+}
+/* Тёмная тема */
+[data-theme="dark"] .loading-main-text {
+    color: var(--blob-1); /* #00ff87 – ярко-зелёный */
+}
+[data-theme="dark"] .loading-sub-text {
+    color: #00cc66; /* более тёмный зелёный */
 }
 .custom-loader {
     width: 64px;
@@ -208,7 +225,6 @@ body {
 }
 
 /* ===== ХЕДЕР ДАШБОРДА ===== */
-/* ИЗМЕНЕНО: увеличен заголовок, увеличен отступ, увеличены кнопки */
 .dashboard-header {
     display: flex;
     justify-content: space-between;
@@ -221,7 +237,7 @@ body {
 .dashboard-header h4 {
     margin: 0;
     white-space: nowrap;
-    font-size: 2.2rem;             /* увеличенный заголовок */
+    font-size: 1.8rem;             /* уменьшенный заголовок (было 2.2rem) */
     flex-shrink: 0;
 }
 .dashboard-header .user-controls {
@@ -253,7 +269,7 @@ body {
         gap: 1rem;
     }
     .dashboard-header h4 {
-        font-size: 1.6rem;
+        font-size: 1.4rem;
     }
     .dashboard-header .user-controls .badge {
         font-size: 0.85rem;
@@ -265,7 +281,7 @@ body {
 }
 @media (max-width: 380px) {
     .dashboard-header h4 {
-        font-size: 1.3rem;
+        font-size: 1.2rem;
     }
     .dashboard-header .user-controls {
         gap: 0.4rem;
@@ -278,7 +294,6 @@ body {
         font-size: 1.1rem;
     }
 }
-/* Конец изменений хедера */
 
 /* ===== СТАТИСТИКА ===== */
 .stat-card {
