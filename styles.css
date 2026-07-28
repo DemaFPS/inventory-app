@@ -1,5 +1,6 @@
 /* ===== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ===== */
 :root {
+    /* Светлая тема */
     --bg-color: #f0f4f8;
     --blob-1: #00f2fe;
     --blob-2: #4facfe;
@@ -46,6 +47,7 @@
 }
 
 [data-theme="dark"] {
+    /* Тёмная тема */
     --bg-color: #050508;
     --blob-1: #00ff87;
     --blob-2: #60efff;
@@ -108,7 +110,6 @@
 .loading-content {
     text-align: center;
 }
-
 .custom-loader {
     width: 64px;
     height: 64px;
@@ -127,11 +128,8 @@
     );
     margin: 0 auto;
 }
-
 @keyframes spin {
-    to {
-        transform: rotate(360deg);
-    }
+    to { transform: rotate(360deg); }
 }
 
 * {
@@ -212,38 +210,41 @@ body {
     flex-wrap: nowrap;
     gap: 8px;
     margin-bottom: 1rem;
+    min-width: 0;
 }
 .dashboard-header h4 {
     margin: 0;
     white-space: nowrap;
     font-size: 1.2rem;
+    flex-shrink: 0;
 }
 .dashboard-header .user-controls {
     display: flex;
     align-items: center;
     gap: 6px;
     flex-shrink: 0;
+    white-space: nowrap;
 }
 .dashboard-header .user-controls .badge {
     font-size: 0.75rem;
-    padding: 0.4rem 0.6rem;
+    padding: 0.3rem 0.5rem;
+    white-space: nowrap;
 }
 .dashboard-header .user-controls .btn {
     padding: 0.2rem 0.4rem;
     font-size: 0.8rem;
+    white-space: nowrap;
 }
 @media (max-width: 480px) {
-    .dashboard-header h4 {
-        font-size: 1rem;
-    }
-    .dashboard-header .user-controls .badge {
-        font-size: 0.65rem;
-        padding: 0.25rem 0.4rem;
-    }
-    .dashboard-header .user-controls .btn {
-        padding: 0.15rem 0.3rem;
-        font-size: 0.7rem;
-    }
+    .dashboard-header h4 { font-size: 1rem; }
+    .dashboard-header .user-controls .badge { font-size: 0.65rem; padding: 0.2rem 0.4rem; }
+    .dashboard-header .user-controls .btn { padding: 0.15rem 0.3rem; font-size: 0.7rem; }
+}
+@media (max-width: 380px) {
+    .dashboard-header h4 { font-size: 0.9rem; }
+    .dashboard-header .user-controls { gap: 4px; }
+    .dashboard-header .user-controls .badge { font-size: 0.6rem; padding: 0.15rem 0.3rem; }
+    .dashboard-header .user-controls .btn { padding: 0.1rem 0.2rem; font-size: 0.6rem; }
 }
 
 /* ===== СТАТИСТИКА ===== */
@@ -317,8 +318,6 @@ body {
     border-top: 1px solid var(--divider);
     padding: 12px 16px !important;
 }
-
-/* ===== УМЕНЬШЕННОЕ ПОЛЕ ВВОДА ===== */
 .manual-input .input-group {
     max-width: 80%;
     margin: 0 auto;
@@ -350,7 +349,6 @@ body {
 .status-green .status-dot { background: var(--color-green); }
 .status-yellow .status-dot { background: var(--color-yellow); }
 .status-red .status-dot { background: var(--color-red); }
-
 .status-green { border-left-color: var(--color-green); }
 .status-yellow { border-left-color: var(--color-yellow); }
 .status-red { border-left-color: var(--color-red); }
@@ -367,7 +365,6 @@ body {
     align-items: center;
     padding: 8px 12px;
     border-radius: 24px;
-
     background: var(--glass-bg);
     backdrop-filter: blur(40px) saturate(220%);
     -webkit-backdrop-filter: blur(40px) saturate(220%);
@@ -378,7 +375,6 @@ body {
     transition: all 0.5s ease;
     z-index: 1000;
 }
-
 .liquid-nav::before {
     content: '';
     position: absolute;
@@ -389,7 +385,6 @@ body {
     z-index: 6;
     transition: background 0.5s ease;
 }
-
 .liquid-glare-container {
     position: absolute;
     inset: 0;
@@ -409,7 +404,6 @@ body {
 .liquid-nav:hover .liquid-glare {
     opacity: 1;
 }
-
 .nav-items {
     position: relative;
     display: flex;
@@ -417,7 +411,6 @@ body {
     z-index: 3;
     flex: 1;
 }
-
 .active-pill {
     position: absolute;
     top: 0; left: 0;
@@ -430,7 +423,6 @@ body {
                 background 0.5s ease, box-shadow 0.5s ease;
     z-index: 1;
 }
-
 .nav-btn {
     position: relative;
     background: transparent;
@@ -456,16 +448,9 @@ body {
     pointer-events: none;
     transition: transform 0.2s cubic-bezier(0.32, 0.72, 0, 1);
 }
-.nav-btn:active .btn-content {
-    transform: scale(0.92);
-}
-.nav-btn.active {
-    color: var(--icon-active);
-}
-.nav-btn i {
-    font-size: 1.4rem;
-}
-
+.nav-btn:active .btn-content { transform: scale(0.92); }
+.nav-btn.active { color: var(--icon-active); }
+.nav-btn i { font-size: 1.4rem; }
 .divider {
     width: 1px;
     height: 22px;
@@ -474,7 +459,6 @@ body {
     z-index: 3;
     transition: background 0.5s ease;
 }
-
 .theme-btn {
     position: relative;
     background: transparent;
@@ -503,9 +487,7 @@ body {
     pointer-events: none;
     transition: transform 0.2s cubic-bezier(0.32, 0.72, 0, 1);
 }
-.theme-btn:active .theme-icon-wrapper {
-    transform: scale(0.8);
-}
+.theme-btn:active .theme-icon-wrapper { transform: scale(0.8); }
 .theme-icon-wrapper svg {
     position: absolute;
     top: 0; left: 0;
@@ -514,7 +496,6 @@ body {
 }
 .sun { opacity: 1; transform: rotate(0deg) scale(1); }
 .moon { opacity: 0; transform: rotate(-90deg) scale(0); }
-
 [data-theme="dark"] .sun { opacity: 0; transform: rotate(90deg) scale(0); }
 [data-theme="dark"] .moon { opacity: 1; transform: rotate(0deg) scale(1); }
 
@@ -581,12 +562,8 @@ body {
         padding-bottom: 0;
         min-height: 100vh;
     }
-    .liquid-nav {
-        display: none;
-    }
-    #reader {
-        min-height: 80vh;
-    }
+    .liquid-nav { display: none; }
+    #reader { min-height: 80vh; }
     .manual-input {
         position: fixed;
         bottom: 20px;
@@ -599,9 +576,7 @@ body {
         padding: 12px !important;
         box-shadow: 0 4px 20px rgba(0,0,0,0.3);
     }
-    .scanner-header {
-        background: rgba(0,0,0,0.3);
-    }
+    .scanner-header { background: rgba(0,0,0,0.3); }
     .scanner-container {
         min-height: 100vh;
         border-radius: 0;
