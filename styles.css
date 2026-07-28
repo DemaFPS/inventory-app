@@ -225,10 +225,10 @@ body {
 /* ===== ХЕДЕР ДАШБОРДА ===== */
 .dashboard-header {
     display: flex;
-    justify-content: space-between;
+    justify-content: space-between;  /* заголовок слева, блок справа */
     align-items: center;
-    flex-wrap: nowrap;          /* по умолчанию в одну строку */
-    gap: 1rem;                 /* уменьшенный отступ между заголовком и блоком */
+    flex-wrap: nowrap;               /* пока не заставим перенести */
+    gap: 1rem;
     margin-bottom: 1.5rem;
     min-width: 0;
 }
@@ -236,24 +236,24 @@ body {
     margin: 0;
     white-space: nowrap;
     font-size: 1.8rem;
-    flex-shrink: 1;            /* разрешаем сжиматься, если нужно */
-    min-width: 0;              /* разрешаем уменьшение */
+    flex-shrink: 1;                 /* разрешаем сжиматься при необходимости */
+    min-width: 0;
 }
 .dashboard-header .user-controls {
     display: flex;
     align-items: center;
-    gap: 0.5rem;               /* уменьшенное расстояние между элементами */
-    flex-shrink: 1;            /* разрешаем сжиматься */
+    gap: 0.5rem;
+    flex-shrink: 1;                 /* разрешаем сжиматься, чтобы не вылезать */
     white-space: nowrap;
     min-width: 0;
 }
 .dashboard-header .user-controls .badge {
     font-size: 1rem;
-    padding: 0.4rem 0.6rem;    /* чуть меньше отступы */
+    padding: 0.4rem 0.6rem;
     white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;   /* если имя длинное – обрезаем с многоточием */
-    max-width: 120px;          /* ограничиваем ширину бейджа */
+    text-overflow: ellipsis;
+    max-width: 120px;               /* ограничиваем ширину бейджа */
 }
 .dashboard-header .user-controls .btn {
     padding: 0.3rem 0.4rem;
@@ -262,13 +262,13 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    flex-shrink: 0;            /* кнопки не сжимаются, но они маленькие */
+    flex-shrink: 0;
 }
 .dashboard-header .user-controls .btn i {
-    font-size: 1.4rem;         /* уменьшенный размер иконок */
+    font-size: 1.4rem;
 }
 
-/* ===== Адаптив для планшетов и телефонов ===== */
+/* ===== Адаптив для экранов ≤ 576px ===== */
 @media (max-width: 576px) {
     .dashboard-header h4 {
         font-size: 1.5rem;
@@ -283,22 +283,18 @@ body {
     }
 }
 
+/* ===== Адаптив для экранов ≤ 430px (телефоны) ===== */
 @media (max-width: 430px) {
     .dashboard-header {
-        flex-wrap: wrap;        /* разрешаем перенос на новую строку */
-        justify-content: center;
-        gap: 0.3rem;
+        gap: 0.5rem;                /* уменьшаем расстояние между заголовком и блоком */
     }
     .dashboard-header h4 {
         font-size: 1.3rem;
-        text-align: center;
-        width: 100%;            /* заголовок занимает всю ширину */
-        white-space: normal;    /* разрешаем перенос слов */
+        flex-shrink: 0;             /* не даём сжиматься, чтобы он был фиксированного размера */
     }
     .dashboard-header .user-controls {
         gap: 0.3rem;
-        flex-wrap: wrap;        /* разрешаем перенос элементов внутри блока */
-        justify-content: center;
+        flex-shrink: 0;             /* не даём блоку сжиматься, он займёт столько, сколько нужно */
     }
     .dashboard-header .user-controls .badge {
         font-size: 0.8rem;
@@ -313,9 +309,25 @@ body {
     }
 }
 
+/* ===== Для очень узких экранов (≤ 360px) – включаем перенос ===== */
 @media (max-width: 360px) {
+    .dashboard-header {
+        flex-wrap: wrap;            /* разрешаем перенос на новую строку */
+        justify-content: space-between; /* заголовок слева, блок справа (но они на разных строках) */
+        gap: 0.3rem;
+    }
     .dashboard-header h4 {
         font-size: 1.1rem;
+        width: 100%;                /* занимает всю ширину */
+        text-align: left;           /* выравниваем по левому краю */
+        flex-shrink: 0;
+        white-space: normal;        /* разрешаем перенос слов, если слишком длинное */
+    }
+    .dashboard-header .user-controls {
+        width: 100%;                /* занимает всю ширину */
+        justify-content: flex-end;  /* прижимаем содержимое к правому краю */
+        gap: 0.2rem;
+        flex-shrink: 0;
     }
     .dashboard-header .user-controls .badge {
         font-size: 0.7rem;
