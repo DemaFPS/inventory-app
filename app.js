@@ -1,6 +1,8 @@
 /**
- * app.js – Главный модуль с полной поддержкой QR, создания устройств, синхронизации
- * Исправлена проблема дублирования при создании, улучшена обратная связь
+ * app.js – Исправленная версия
+ * - Устранено дублирование при создании устройств
+ * - Автоматическое обновление счётчиков и данных после создания
+ * - Корректное открытие карточки при повторном сканировании
  */
 
 // ============================
@@ -22,7 +24,7 @@ const auth = firebase.auth();
 // ============================
 // 1. КОНФИГУРАЦИЯ ПРОКСИ (ЗАМЕНИТЕ ПОСЛЕ ПЕРЕРАЗВЁРТЫВАНИЯ)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbw0aKhswVzQIndQTL64E4tHG01DM30CewBxrTaq6QNUEnJu4SBy0t7fuyrvZH7I0xjt/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbzo3OgShVeRO1L8xLEmlFS9lPhatTThsgMYr0C5Rs4PeLtLAm-O9YKuGCNbKZBzOolu/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -35,12 +37,11 @@ let isScanning = false;
 let isInitializingScanner = false;
 let currentUser = null;
 let localUserName = localStorage.getItem('localUserName') || 'Аноним';
-let isCreating = false; // Флаг блокировки повторного создания
+let isCreating = false;
 
 // ============================
 // 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 // ============================
-
 function showToast(message, type = 'success') {
     const toastEl = document.getElementById('liveToast');
     if (!toastEl) return;
@@ -168,7 +169,6 @@ function getInitiatorName() {
 // ============================
 // 4. РАБОТА С ПРОКСИ
 // ============================
-
 async function callProxy(action, payload = {}) {
     try {
         const response = await fetch(PROXY_URL, {
@@ -257,10 +257,10 @@ async function addDevice(deviceData) {
         throw new Error('Invalid inventory number');
     }
 
-    // Проверяем, нет ли уже такого устройства (дубль)
-    const existing = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(inventoryNumber));
-    if (existing) {
-        showToast('Устройство с таким номером уже существует', 'warning');
+    // Жёсткая проверка локально перед отправкой
+    const existsLocal = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(inventoryNumber));
+    if (existsLocal) {
+        showToast('Устройство с номером ' + inventoryNumber + ' уже существует локально', 'warning');
         throw new Error('Duplicate');
     }
 
@@ -270,11 +270,21 @@ async function addDevice(deviceData) {
             initiator: getInitiatorName()
         });
         showToast(result.message || 'Устройство создано', 'success');
-        // Перезагружаем данные, чтобы обновить список
+
+        // Принудительная перезагрузка данных с сервера
         await loadInventory();
+        // Обновляем счётчики
+        updateDashboardStats();
+        // Обновляем список кабинетов, если они есть
+        loadCabinetSelect();
         return result;
     } catch (error) {
-        showToast('Ошибка создания: ' + error.message, 'danger');
+        // Если сервер вернул ошибку о дубликате
+        if (error.message && error.message.includes('уже существует')) {
+            showToast('Устройство с номером ' + inventoryNumber + ' уже существует в базе', 'warning');
+        } else {
+            showToast('Ошибка создания: ' + error.message, 'danger');
+        }
         throw error;
     }
 }
@@ -282,7 +292,6 @@ async function addDevice(deviceData) {
 // ============================
 // 5. ДАШБОРД
 // ============================
-
 function updateDashboardStats() {
     const total = inventoryData.length;
     const expiring = inventoryData.filter(d => isWarrantyExpiring(d && d.warrantyEndDate)).length;
@@ -297,9 +306,8 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 6. СКАНЕР
+// 6. СКАНЕР (исправлена обработка QR)
 // ============================
-
 async function initScanner() {
     if (isInitializingScanner) return;
     if (scannerInstance && isScanning) return;
@@ -365,31 +373,51 @@ function onScanSuccess(decodedText, decodedResult) {
 
     const rawText = decodedText.trim();
 
-    // --- QR-код (или ссылка) ---
-    if (format === 'QR_CODE' || format === 'QR' || rawText.startsWith('http://') || rawText.startsWith('https://')) {
-        if (navigator.onLine) {
-            const modal = new bootstrap.Modal(document.getElementById('qrLinkModal'));
-            document.getElementById('qrLinkText').textContent = rawText;
-            document.getElementById('qrLinkHref').href = rawText;
-            modal.show();
+    // --- QR-код ---
+    if (format === 'QR_CODE' || format === 'QR') {
+        if (rawText.startsWith('http://') || rawText.startsWith('https://')) {
+            if (navigator.onLine) {
+                const modal = new bootstrap.Modal(document.getElementById('qrLinkModal'));
+                document.getElementById('qrLinkText').textContent = rawText;
+                document.getElementById('qrLinkHref').href = rawText;
+                modal.show();
+            } else {
+                savePendingScan(rawText, 'qr');
+                showToast('QR-код сохранён в журнале (офлайн). После восстановления интернета будет предложен переход.', 'warning');
+                setTimeout(() => {
+                    if (document.getElementById('scanner').classList.contains('active')) initScanner();
+                }, 1500);
+            }
+            return;
         } else {
-            savePendingScan(rawText, 'qr');
-            showToast('QR-код сохранён в журнале (офлайн). После восстановления интернета будет предложен переход.', 'warning');
-            setTimeout(() => {
-                if (document.getElementById('scanner').classList.contains('active')) initScanner();
-            }, 1500);
+            // QR-код не URL – обрабатываем как номер
+            const normalized = normalizeInventoryNumber(rawText);
+            const device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
+            if (device) {
+                currentDevice = device;
+                showScreen('deviceCard');
+                renderDeviceCard(device);
+                return;
+            } else {
+                if (navigator.onLine) {
+                    showCreateDeviceModal(rawText);
+                } else {
+                    savePendingScan(rawText, 'barcode');
+                    showToast('QR-код сохранён в журнале (офлайн).', 'warning');
+                    setTimeout(() => {
+                        if (document.getElementById('scanner').classList.contains('active')) initScanner();
+                    }, 1500);
+                }
+                return;
+            }
         }
-        return;
     }
 
-    // --- Штрих-код (или обычный номер) ---
+    // --- Штрих-код (EAN-13 или другой) ---
     const normalized = normalizeInventoryNumber(rawText);
-    console.log('Ищем устройство с номером:', normalized);
+    console.log('Ищем устройство по штрих-коду:', normalized);
 
-    const device = inventoryData.find(d => {
-        if (!d || !d.inventoryNumber) return false;
-        return normalizeInventoryNumber(d.inventoryNumber) === normalized;
-    });
+    const device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
 
     if (device) {
         currentDevice = device;
@@ -414,7 +442,6 @@ function onScanError(err) {
     // игнорируем
 }
 
-// Ручной ввод
 function handleManualFind() {
     const input = document.getElementById('manualInvInput');
     if (!input) return;
@@ -428,10 +455,7 @@ function handleManualFind() {
         return;
     }
     const normalized = normalizeInventoryNumber(rawValue);
-    const device = inventoryData.find(d => {
-        if (!d || !d.inventoryNumber) return false;
-        return normalizeInventoryNumber(d.inventoryNumber) === normalized;
-    });
+    const device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
     if (device) {
         currentDevice = device;
         showScreen('deviceCard');
@@ -448,9 +472,8 @@ function handleManualFind() {
 }
 
 // ============================
-// 7. КАРТОЧКА УСТРОЙСТВА
+// 7. КАРТОЧКА (без изменений)
 // ============================
-
 function renderDeviceCard(device) {
     if (!device) {
         showToast('Ошибка: устройство не найдено', 'danger');
@@ -491,9 +514,8 @@ function renderDeviceCard(device) {
 }
 
 // ============================
-// 8. ОБРАБОТЧИКИ ДЕЙСТВИЙ
+// 8. ОБРАБОТЧИКИ ДЕЙСТВИЙ (без изменений)
 // ============================
-
 async function performDeviceAction(action, data = {}) {
     if (!currentDevice) {
         showToast('Устройство не выбрано', 'warning');
@@ -566,6 +588,7 @@ async function performDeviceAction(action, data = {}) {
 
     try {
         await updateDevice(inv, updates);
+        // Обновляем локальные данные
         const updated = inventoryData.find(d => d && d.inventoryNumber === inv);
         if (updated) {
             currentDevice = updated;
@@ -578,15 +601,16 @@ async function performDeviceAction(action, data = {}) {
                 renderDeviceCard(reloaded);
             }
         }
+        // Обновляем счётчики после действия
+        updateDashboardStats();
     } catch (error) {
         savePendingAction(inv, updates);
     }
 }
 
 // ============================
-// 9. ОБОРОТНАЯ ВЕДОМОСТЬ
+// 9. ОБОРОТНАЯ ВЕДОМОСТЬ (без изменений)
 // ============================
-
 async function loadCabinetSelect() {
     const select = document.getElementById('cabinetSelect');
     if (!select) return;
@@ -656,13 +680,11 @@ function renderChecklist(cabinetName) {
 }
 
 // ============================
-// 10. ОФЛАЙН-РЕЖИМ И СИНХРОНИЗАЦИЯ
+// 10. ОФЛАЙН-РЕЖИМ (без изменений)
 // ============================
-
 function savePendingScan(inventoryNumber, type = 'barcode') {
     let pending = JSON.parse(localStorage.getItem('pendingScans') || '[]');
     if (!Array.isArray(pending)) pending = [];
-    // Проверяем, нет ли уже такого же сканирования (чтобы не дублировать)
     const exists = pending.some(item => item.inventoryNumber === inventoryNumber && item.type === type);
     if (!exists) {
         pending.push({
@@ -695,7 +717,6 @@ async function syncPendingData() {
         return;
     }
 
-    // Сканирования
     const pendingScans = JSON.parse(localStorage.getItem('pendingScans') || '[]');
     if (pendingScans.length) {
         const toRemove = [];
@@ -708,10 +729,7 @@ async function syncPendingData() {
                 toRemove.push(item);
             } else if (item.type === 'barcode') {
                 const normalized = normalizeInventoryNumber(item.inventoryNumber);
-                const device = inventoryData.find(d => {
-                    if (!d || !d.inventoryNumber) return false;
-                    return normalizeInventoryNumber(d.inventoryNumber) === normalized;
-                });
+                const device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
                 if (device) {
                     showToast(`Устройство ${item.inventoryNumber} найдено в базе!`, 'success');
                     currentDevice = device;
@@ -731,7 +749,6 @@ async function syncPendingData() {
         renderLogs();
     }
 
-    // Действия
     const pendingActions = JSON.parse(localStorage.getItem('pendingActions') || '[]');
     if (pendingActions.length) {
         const failed = [];
@@ -759,7 +776,6 @@ async function syncPendingData() {
 // ============================
 // 11. ЛОГИ
 // ============================
-
 function renderLogs() {
     const container = document.getElementById('logsList');
     const scansCount = document.getElementById('pendingScansCount');
@@ -831,9 +847,8 @@ window.createFromLog = function(inventoryNumber) {
 };
 
 // ============================
-// 12. МОДАЛКА СОЗДАНИЯ УСТРОЙСТВА
+// 12. МОДАЛКА СОЗДАНИЯ
 // ============================
-
 function showCreateDeviceModal(inventoryNumber) {
     document.getElementById('createInventoryNumber').value = inventoryNumber;
     document.getElementById('createModel').value = '';
@@ -846,7 +861,6 @@ function showCreateDeviceModal(inventoryNumber) {
 }
 
 async function confirmCreateDevice() {
-    // Защита от повторного нажатия
     if (isCreating) {
         showToast('Подождите, идёт создание...', 'warning');
         return;
@@ -868,10 +882,10 @@ async function confirmCreateDevice() {
         return;
     }
 
-    // Проверяем, существует ли уже такое устройство в текущих данных
+    // Проверяем локально перед отправкой
     const exists = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(inv));
     if (exists) {
-        showToast('Устройство с таким номером уже существует', 'warning');
+        showToast('Устройство с номером ' + inv + ' уже существует', 'warning');
         return;
     }
 
@@ -881,20 +895,20 @@ async function confirmCreateDevice() {
     btn.textContent = 'Создание...';
 
     try {
-        // Закрываем модалку сразу, чтобы показать процесс
         const modal = bootstrap.Modal.getInstance(document.getElementById('createDeviceModal'));
         if (modal) modal.hide();
 
         await addDevice({ inventoryNumber: inv, model, serialNumber: serial, status, responsiblePerson: responsible, warrantyEndDate: warranty });
 
-        // Удаляем из очереди сканирований, если есть
+        // Удаляем из очереди сканирований
         let pendingScans = JSON.parse(localStorage.getItem('pendingScans') || '[]');
         pendingScans = pendingScans.filter(item => item.inventoryNumber !== inv);
         localStorage.setItem('pendingScans', JSON.stringify(pendingScans));
         renderLogs();
 
-        // После успешного создания загружаем данные и показываем карточку
+        // После создания загружаем данные и показываем карточку
         await loadInventory();
+        updateDashboardStats();
         const device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(inv));
         if (device) {
             currentDevice = device;
@@ -905,7 +919,7 @@ async function confirmCreateDevice() {
         }
     } catch (e) {
         console.error('Ошибка создания:', e);
-        // Не показываем повторный тост, так как ошибка уже отображена в addDevice
+        // Ошибка уже обработана в addDevice
     } finally {
         isCreating = false;
         btn.disabled = false;
@@ -916,7 +930,6 @@ async function confirmCreateDevice() {
 // ============================
 // 13. ОТЧЁТ
 // ============================
-
 function generateCSV(data) {
     if (!data || !Array.isArray(data) || data.length === 0) return '';
     const headers = ['Инвентарный номер', 'Серийный номер', 'Модель', 'Статус', 'Ответственное лицо', 'Дата окончания гарантии', 'История перемещений', 'Последнее изменение', 'Инициатор'];
@@ -1001,9 +1014,8 @@ function printReport() {
 }
 
 // ============================
-// 14. НАВИГАЦИЯ (PILL)
+// 14. НАВИГАЦИЯ
 // ============================
-
 let navButtons = [];
 let activePill = null;
 
@@ -1023,7 +1035,6 @@ function updateActivePill(smooth = true) {
 // ============================
 // 15. ИНИЦИАЛИЗАЦИЯ
 // ============================
-
 document.addEventListener('DOMContentLoaded', async function() {
     // --- Firebase Auth ---
     auth.onAuthStateChanged(async user => {
@@ -1327,7 +1338,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     // --- События модалки создания ---
     document.getElementById('confirmCreateDevice')?.addEventListener('click', confirmCreateDevice);
 
-    // --- Автосинхронизация при восстановлении сети ---
+    // --- Автосинхронизация ---
     window.addEventListener('online', function() {
         syncPendingData();
         loadInventory().then(() => {
