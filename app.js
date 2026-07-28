@@ -127,11 +127,13 @@ function formatDate(dateStr) {
     return String(dateStr);
 }
 
+// ===== НОВАЯ ФУНКЦИЯ (изменена) =====
 function getStatusColorClass(device) {
-    if (!device) return 'status-yellow';
+    if (!device) return 'status-red';
     const status = device.status || '';
     if (status === 'Списан') return 'status-red';
-    if (status === 'В ремонте' || status === 'На складе') return 'status-yellow';
+    if (status === 'В ремонте') return 'status-red';
+    if (status === 'На складе') return 'status-grey';
     if (status === 'В эксплуатации') {
         if (isWarrantyExpired(device.warrantyEndDate)) return 'status-red';
         if (isWarrantyExpiring(device.warrantyEndDate)) return 'status-yellow';

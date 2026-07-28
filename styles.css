@@ -219,7 +219,7 @@ body {
     flex-shrink: 0;
 }
 .header-badge {
-    flex: 1; /* занимает всё свободное место между заголовком и кнопкой смены имени */
+    flex: 1;
     text-align: center;
     font-size: 1rem;
     padding: 0.4rem 0.6rem;
@@ -324,7 +324,7 @@ body {
     padding: 0.3rem 0.7rem;
 }
 
-/* ===== КАРТОЧКА УСТРОЙСТВА ===== */
+/* ===== КАРТОЧКА УСТРОЙСТВА (С СЕРЫМ СТАТУСОМ) ===== */
 .device-header {
     background: var(--device-header-bg);
     border-left: 6px solid #6c757d;
@@ -338,12 +338,16 @@ body {
     border: 2px solid white;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
+/* Цвета статусов */
 .status-green .status-dot { background: var(--color-green); }
 .status-yellow .status-dot { background: var(--color-yellow); }
 .status-red .status-dot { background: var(--color-red); }
+.status-grey .status-dot { background: #adb5bd; }
+
 .status-green { border-left-color: var(--color-green); }
 .status-yellow { border-left-color: var(--color-yellow); }
 .status-red { border-left-color: var(--color-red); }
+.status-grey { border-left-color: #adb5bd; }
 
 /* ===== НИЖНЯЯ НАВИГАЦИЯ (LIQUID NAV) ===== */
 .liquid-nav {
@@ -608,7 +612,7 @@ body {
         min-height: 100vh;
     }
     .liquid-nav {
-        display: none !important; /* скрываем панель только на телефонах в горизонтальном режиме */
+        display: none !important;
     }
     #reader {
         min-height: 80vh;
