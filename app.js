@@ -9,13 +9,13 @@
 // 0. КОНФИГУРАЦИЯ FIREBASE (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
 const firebaseConfig = {
-    apiKey: "AIzaSyCsPVf6XFCi9_dZlK53mqAXB9RjBGcfMnc",
-    authDomain: "inventory-app-8f696.firebaseapp.com",
-    projectId: "inventory-app-8f696",
-    storageBucket: "inventory-app-8f696.firebasestorage.app",
-    messagingSenderId: "8094390774",
-    appId: "1:8094390774:web:b1e63668361a7b61fd0fd7",
-    measurementId: "G-V8NQ4E7F8Y"
+  apiKey: "AIzaSyCsPVf6XFCi9_dZlK53mqAXB9RjBGcfMnc",
+  authDomain: "inventory-app-8f696.firebaseapp.com",
+  projectId: "inventory-app-8f696",
+  storageBucket: "inventory-app-8f696.firebasestorage.app",
+  messagingSenderId: "8094390774",
+  appId: "1:8094390774:web:b1e63668361a7b61fd0fd7",
+  measurementId: "G-V8NQ4E7F8Y"
 };
 
 firebase.initializeApp(firebaseConfig);
