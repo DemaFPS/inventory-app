@@ -1,5 +1,5 @@
 /**
- * app.js – Оптимизированная версия с увеличенной длиной номера и улучшенной обработкой ошибок
+ * app.js – Оптимизированная версия с увеличенной длиной номера, улучшенной обработкой ошибок и экраном загрузки
  */
 
 // ============================
@@ -189,7 +189,6 @@ async function callProxy(action, payload = {}) {
         try {
             data = JSON.parse(text);
         } catch (e) {
-            // Если ответ не JSON (например, "OK" или HTML-ошибка)
             throw new Error(`Сервер вернул невалидный JSON: ${text.substring(0, 50)}`);
         }
         if (!data || typeof data !== 'object') {
@@ -295,7 +294,6 @@ async function addDevice(deviceData) {
             if (e.message && (e.message.includes('уже существует') || e.message.includes('Duplicate'))) {
                 throw e;
             }
-            // Иначе игнорируем ошибку и продолжаем создание (возможно, проблема с сетью)
             console.warn('Ошибка проверки на сервере, продолжаем создание:', e);
         }
     }
@@ -474,7 +472,6 @@ function onScanSuccess(decodedText, decodedResult) {
         }
     }).catch(err => {
         console.error('Ошибка загрузки с сервера:', err);
-        // Пробуем ещё раз локально
         const cached = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
         if (cached) {
             currentDevice = cached;
@@ -584,7 +581,7 @@ function renderDeviceCard(device) {
 }
 
 // ============================
-// 8. ОБРАБОТЧИКИ ДЕЙСТВИЙ (с правильным сохранением офлайн)
+// 8. ОБРАБОТЧИКИ ДЕЙСТВИЙ
 // ============================
 async function performDeviceAction(action, data = {}) {
     if (!currentDevice) {
@@ -684,10 +681,7 @@ async function performDeviceAction(action, data = {}) {
         updateDashboardStats();
         removePendingAction(inv);
     } catch (error) {
-        // Если ошибка – показываем её, но НЕ сохраняем в офлайн (интернет есть)
         showToast('Ошибка при выполнении действия: ' + error.message, 'danger');
-        // Не сохраняем в офлайн, т.к. интернет есть, но что-то пошло не так
-        // Пользователь может повторить позже вручную
     }
 }
 
@@ -699,7 +693,7 @@ function removePendingAction(inventoryNumber) {
 }
 
 // ============================
-// 9. ОБОРОТНАЯ ВЕДОМОСТЬ (без изменений)
+// 9. ОБОРОТНАЯ ВЕДОМОСТЬ
 // ============================
 async function loadCabinetSelect() {
     const select = document.getElementById('cabinetSelect');
@@ -1065,7 +1059,7 @@ async function confirmCreateDevice() {
 }
 
 // ============================
-// 13. ОТЧЁТ (без изменений)
+// 13. ОТЧЁТ
 // ============================
 function generateCSV(data) {
     if (!data || !Array.isArray(data) || data.length === 0) return '';
@@ -1506,5 +1500,18 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     }, 120000);
 
+    // --- Показываем дашборд ---
     showScreen('dashboard');
+
+    // ============================================================
+    // Скрываем экран загрузки после полной инициализации
+    // ============================================================
+    const loadingScreen = document.getElementById('loading-screen');
+    if (loadingScreen) {
+        // Небольшая задержка для плавности
+        setTimeout(() => {
+            loadingScreen.classList.add('hidden');
+            document.getElementById('appContainer').style.display = 'block';
+        }, 400);
+    }
 });
