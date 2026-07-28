@@ -199,6 +199,33 @@
             </div>
         </div>
 
+        <!-- ========== ЭКРАН 6: ЛОГИ ========== -->
+        <div id="logs" class="screen">
+            <div class="container-fluid p-3">
+                <div class="d-flex align-items-center mb-3">
+                    <button id="backFromLogs" class="btn btn-outline-secondary btn-sm me-2">
+                        <i class="bi bi-arrow-left"></i>
+                    </button>
+                    <h5 class="mb-0">Журнал офлайн-операций</h5>
+                </div>
+                <div class="mb-3">
+                    <span class="badge bg-info" id="pendingScansCount">Сканирований: 0</span>
+                    <span class="badge bg-warning ms-2" id="pendingActionsCount">Действий: 0</span>
+                </div>
+                <div id="logsList" class="list-group mb-3" style="max-height: 400px; overflow-y: auto;">
+                    <div class="text-muted">Нет отложенных операций</div>
+                </div>
+                <div class="d-grid gap-2">
+                    <button id="syncNowBtn" class="btn btn-success">
+                        <i class="bi bi-cloud-upload"></i> Синхронизировать сейчас
+                    </button>
+                    <button id="clearLogsBtn" class="btn btn-outline-danger btn-sm">
+                        <i class="bi bi-trash"></i> Очистить логи (без синхронизации)
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <!-- ========== НИЖНЯЯ НАВИГАЦИЯ ========== -->
         <nav class="liquid-nav" id="bottomNav">
             <div class="liquid-glare-container">
@@ -228,6 +255,12 @@
                     <div class="btn-content">
                         <i class="bi bi-file-earmark-text"></i>
                         <span>Отчёт</span>
+                    </div>
+                </button>
+                <button class="nav-btn" data-screen="logs">
+                    <div class="btn-content">
+                        <i class="bi bi-clock-history"></i>
+                        <span>Логи</span>
                     </div>
                 </button>
             </div>
@@ -363,6 +396,7 @@
                         <li><strong>Отчёт</strong> – выгрузите все данные в CSV или распечатайте (PDF). Можно отфильтровать по кабинету.</li>
                         <li><strong>Офлайн-режим</strong> – при отсутствии интернета все сканирования и изменения сохраняются в телефоне. После восстановления связи они автоматически синхронизируются.</li>
                         <li><strong>Тёмная тема</strong> – переключается иконкой луны/солнца в правом нижнем углу навигации.</li>
+                        <li><strong>Логи</strong> – на вкладке «Логи» можно просмотреть все отложенные операции и вручную запустить синхронизацию.</li>
                     </ol>
                 </div>
                 <div class="modal-footer">

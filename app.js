@@ -2,7 +2,7 @@
  * app.js – Главный модуль мобильного приложения инвентаризации
  * Использует Google Sheets API через прокси-сервер (Google Apps Script)
  * 
- * Версия с Firebase Auth, офлайн-синхронизацией, редактированием, звуком и вибрацией
+ * Версия с Firebase Auth, офлайн-синхронизацией, редактированием, звуком, вибрацией и страницей логов
  */
 
 // ============================
@@ -22,9 +22,9 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 
 // ============================
-// 1. КОНФИГУРАЦИЯ ПРОКСИ
+// 1. КОНФИГУРАЦИЯ ПРОКСИ (ЗАМЕНИТЕ НА СВОЙ URL)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbw_JQ9HXzRxRCWtltVGK_zetb4m3ffnx7UESlR5DE76tkNd0fWcggeipun1kzev7t3Q/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwovTUnlgq7wyqgAum5umvBYc0Sgx_M4UUnFoKcBfhUBBUiG8fnIdiBtUMPB_bBt3Qp/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -83,6 +83,10 @@ function showScreen(screenId) {
     
     if (screenId === 'dashboard') {
         updateDashboardStats();
+    }
+    
+    if (screenId === 'logs') {
+        renderLogs();
     }
     
     setTimeout(updateActivePill, 50);
@@ -616,6 +620,10 @@ function savePendingScan(inventoryNumber) {
     pending.push({ inventoryNumber, timestamp: new Date().toISOString(), action: 'scanned' });
     localStorage.setItem('pendingScans', JSON.stringify(pending));
     showToast('Сканирование сохранено офлайн', 'warning');
+    // Если мы на странице логов – обновляем их
+    if (document.getElementById('logs').classList.contains('active')) {
+        renderLogs();
+    }
 }
 
 function savePendingAction(inventoryNumber, updates) {
@@ -624,10 +632,16 @@ function savePendingAction(inventoryNumber, updates) {
     pending.push({ inventoryNumber, updates, timestamp: new Date().toISOString() });
     localStorage.setItem('pendingActions', JSON.stringify(pending));
     showToast('Действие сохранено офлайн', 'warning');
+    if (document.getElementById('logs').classList.contains('active')) {
+        renderLogs();
+    }
 }
 
 async function syncPendingData() {
-    if (!navigator.onLine) return;
+    if (!navigator.onLine) {
+        showToast('Нет интернета. Синхронизация невозможна.', 'danger');
+        return;
+    }
     
     // Синхронизация сканирований (можно просто отметить как обработанные)
     const pendingScans = JSON.parse(localStorage.getItem('pendingScans') || '[]');
@@ -638,7 +652,11 @@ async function syncPendingData() {
 
     // Синхронизация действий
     const pendingActions = JSON.parse(localStorage.getItem('pendingActions') || '[]');
-    if (!pendingActions.length) return;
+    if (!pendingActions.length) {
+        showToast('Нет отложенных действий для синхронизации', 'info');
+        renderLogs();
+        return;
+    }
     
     const failed = [];
     for (const item of pendingActions) {
@@ -652,15 +670,89 @@ async function syncPendingData() {
     
     if (failed.length === 0) {
         localStorage.removeItem('pendingActions');
-        showToast('Все отложенные действия синхронизированы', 'success');
+        showToast(`Все ${pendingActions.length} действий синхронизированы`, 'success');
     } else {
         localStorage.setItem('pendingActions', JSON.stringify(failed));
         showToast(`Синхронизировано ${pendingActions.length - failed.length} из ${pendingActions.length}`, 'warning');
     }
+    renderLogs();
+    // Обновляем дашборд после синхронизации
+    await loadInventory();
+    updateDashboardStats();
 }
 
 // ============================
-// 11. МОДУЛЬ ОТЧЁТА
+// 11. МОДУЛЬ ЛОГОВ
+// ============================
+
+function renderLogs() {
+    const container = document.getElementById('logsList');
+    const scansCount = document.getElementById('pendingScansCount');
+    const actionsCount = document.getElementById('pendingActionsCount');
+    
+    const pendingScans = JSON.parse(localStorage.getItem('pendingScans') || '[]');
+    const pendingActions = JSON.parse(localStorage.getItem('pendingActions') || '[]');
+    
+    scansCount.textContent = `Сканирований: ${pendingScans.length}`;
+    actionsCount.textContent = `Действий: ${pendingActions.length}`;
+    
+    if (pendingScans.length === 0 && pendingActions.length === 0) {
+        container.innerHTML = '<div class="text-muted">Нет отложенных операций</div>';
+        return;
+    }
+    
+    let html = '';
+    
+    // Сначала сканирования
+    if (pendingScans.length > 0) {
+        html += `<div class="list-group-item list-group-item-secondary"><strong>📷 Сканирования (${pendingScans.length})</strong></div>`;
+        pendingScans.forEach((item, index) => {
+            const date = new Date(item.timestamp).toLocaleString('ru-RU');
+            html += `
+                <div class="list-group-item list-group-item-light d-flex justify-content-between align-items-start">
+                    <div>
+                        <span class="badge bg-info me-1">#${index+1}</span>
+                        <strong>${item.inventoryNumber}</strong>
+                        <br><small class="text-muted">${date}</small>
+                    </div>
+                    <span class="badge bg-secondary">ожидает</span>
+                </div>
+            `;
+        });
+    }
+    
+    // Затем действия
+    if (pendingActions.length > 0) {
+        html += `<div class="list-group-item list-group-item-secondary"><strong>⚡ Действия (${pendingActions.length})</strong></div>`;
+        pendingActions.forEach((item, index) => {
+            const date = new Date(item.timestamp).toLocaleString('ru-RU');
+            const upd = item.updates;
+            let actionText = '';
+            if (upd.status === 'В ремонте') actionText = 'В ремонт';
+            else if (upd.status === 'На складе') actionText = 'На склад';
+            else if (upd.status === 'Списан') actionText = 'Списание';
+            else if (upd.responsiblePerson) actionText = `Передача -> ${upd.responsiblePerson}`;
+            else if (upd.model) actionText = 'Редактирование';
+            else actionText = 'Обновление';
+            
+            html += `
+                <div class="list-group-item list-group-item-warning d-flex justify-content-between align-items-start">
+                    <div>
+                        <span class="badge bg-warning me-1">#${index+1}</span>
+                        <strong>${item.inventoryNumber}</strong> — ${actionText}
+                        <br><small class="text-muted">${date}</small>
+                    </div>
+                    <span class="badge bg-secondary">ожидает</span>
+                </div>
+            `;
+        });
+    }
+    
+    container.innerHTML = html;
+}
+
+// ============================
+// 12. МОДУЛЬ ОТЧЁТА
 // ============================
 
 function generateCSV(data) {
@@ -747,7 +839,7 @@ function printReport() {
 }
 
 // ============================
-// 12. НАСТРОЙКА ТЕМЫ И НАВИГАЦИИ (PILL)
+// 13. НАСТРОЙКА ТЕМЫ И НАВИГАЦИИ (PILL)
 // ============================
 
 let navButtons = [];
@@ -767,7 +859,7 @@ function updateActivePill(smooth = true) {
 }
 
 // ============================
-// 13. ИНИЦИАЛИЗАЦИЯ ПРИ ЗАГРУЗКЕ
+// 14. ИНИЦИАЛИЗАЦИЯ ПРИ ЗАГРУЗКЕ
 // ============================
 
 document.addEventListener('DOMContentLoaded', async function() {
@@ -775,7 +867,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     auth.onAuthStateChanged(async user => {
         if (user) {
             currentUser = user;
-            // Если нет displayName, пробуем взять из localStorage
             if (!user.displayName) {
                 const savedName = localStorage.getItem('localUserName');
                 if (savedName && savedName !== 'Аноним') {
@@ -784,7 +875,6 @@ document.addEventListener('DOMContentLoaded', async function() {
                         currentUser = user;
                     } catch (e) { /* ignore */ }
                 } else {
-                    // Если нет имени, запрашиваем
                     const name = prompt('Введите ваше имя (для отображения в истории):', user.uid.substring(0, 8));
                     if (name) {
                         await user.updateProfile({ displayName: name });
@@ -793,16 +883,13 @@ document.addEventListener('DOMContentLoaded', async function() {
                     }
                 }
             } else {
-                // Если displayName уже есть, сохраняем в localStorage
                 localStorage.setItem('localUserName', user.displayName);
             }
             document.getElementById('userDisplay').textContent = currentUser.displayName || currentUser.uid || 'Аноним';
         } else {
-            // Попытка анонимного входа
             try {
                 const cred = await auth.signInAnonymously();
                 currentUser = cred.user;
-                // Проверяем, есть ли сохранённое имя
                 const savedName = localStorage.getItem('localUserName');
                 if (savedName && savedName !== 'Аноним') {
                     try {
@@ -812,7 +899,6 @@ document.addEventListener('DOMContentLoaded', async function() {
                 document.getElementById('userDisplay').textContent = currentUser.displayName || currentUser.uid || 'Аноним';
             } catch (e) {
                 console.error('Ошибка анонимного входа:', e);
-                // Если Firebase не доступен, используем локальное имя
                 document.getElementById('userDisplay').textContent = localUserName;
                 showToast('Режим офлайн: изменения будут сохранены локально', 'warning');
             }
@@ -886,6 +972,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     });
     document.getElementById('backFromChecklist')?.addEventListener('click', () => showScreen('dashboard'));
     document.getElementById('backFromReport')?.addEventListener('click', () => showScreen('dashboard'));
+    document.getElementById('backFromLogs')?.addEventListener('click', () => showScreen('dashboard'));
 
     // Ручной ввод
     document.getElementById('manualFindBtn')?.addEventListener('click', handleManualFind);
@@ -1061,6 +1148,21 @@ document.addEventListener('DOMContentLoaded', async function() {
     document.getElementById('helpBtn')?.addEventListener('click', function() {
         const modal = new bootstrap.Modal(document.getElementById('helpModal'));
         modal.show();
+    });
+
+    // --- Логи ---
+    document.getElementById('syncNowBtn')?.addEventListener('click', async function() {
+        await syncPendingData();
+        // После синхронизации обновляем список
+        renderLogs();
+    });
+    document.getElementById('clearLogsBtn')?.addEventListener('click', function() {
+        if (confirm('Вы уверены, что хотите очистить все отложенные операции без синхронизации?')) {
+            localStorage.removeItem('pendingScans');
+            localStorage.removeItem('pendingActions');
+            renderLogs();
+            showToast('Логи очищены', 'info');
+        }
     });
 
     // --- Автоматическая синхронизация при восстановлении сети ---
