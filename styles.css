@@ -90,7 +90,6 @@
 }
 
 /* ===== ЭКРАН ЗАГРУЗКИ ===== */
-/* ===== ЭКРАН ЗАГРУЗКИ ===== */
 .loading-overlay {
     position: fixed;
     top: 0;
@@ -114,19 +113,19 @@
 }
 .loading-main-text {
     font-weight: 700;
-    /* Светлая тема (по умолчанию) – тёмный цвет (как было раньше) */
-    color: #212529;
+    /* Светлая тема – синеватый (как старый primary) */
+    color: var(--color-primary); /* #4A90E2 или #0d6efd если хотите точнее */
     transition: color 0.5s ease;
 }
 .loading-sub-text {
     font-size: 0.9rem;
     transition: color 0.5s ease;
     /* Светлая тема – ярко-голубой (цвет лоадера) */
-    color: var(--blob-1); /* #00f2fe */
+    color: var(--blob-1);
 }
 /* Тёмная тема */
 [data-theme="dark"] .loading-main-text {
-    color: var(--blob-1); /* #00ff87 – ярко-зелёный */
+    color: var(--blob-1); /* ярко-зелёный */
 }
 [data-theme="dark"] .loading-sub-text {
     color: #00cc66; /* более тёмный зелёный */
