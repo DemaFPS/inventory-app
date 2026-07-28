@@ -31,6 +31,18 @@
     --color-text: #212529;
     --color-shadow: rgba(0,0,0,0.05);
     --device-header-bg: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+
+    /* Лоадер – океанический (светлая тема) */
+    --loader-gradient: conic-gradient(
+        from 0deg,
+        #ff8000,
+        #00ff19,
+        #9900ff,
+        #ffff00,
+        #FF0000,
+        #00CCFF,
+        #ff8000
+    );
 }
 
 [data-theme="dark"] {
@@ -61,6 +73,18 @@
     --color-text: #e0e0e0;
     --color-shadow: rgba(255,255,255,0.03);
     --device-header-bg: linear-gradient(135deg, #2d2d3f 0%, #1a1a2e 100%);
+
+    /* Лоадер – неоново-зелёный (тёмная тема) */
+    --loader-gradient: conic-gradient(
+        from 0deg,
+        #00ff87,
+        #00cc66,
+        #00994d,
+        #00ff87,
+        #00cc66,
+        #00994d,
+        #00ff87
+    );
 }
 
 /* ===== ЭКРАН ЗАГРУЗКИ ===== */
@@ -84,10 +108,34 @@
 .loading-content {
     text-align: center;
 }
-.loading-content .spinner-border {
-    color: var(--color-primary);
+
+/* ===== КАСТОМНЫЙ ЛОАДЕР ===== */
+.custom-loader {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: var(--loader-gradient);
+    animation: spin 1.5s linear infinite;
+    mask: radial-gradient(
+        farthest-side,
+        transparent calc(100% - 10px),
+        #fff calc(100% - 9px)
+    );
+    -webkit-mask: radial-gradient(
+        farthest-side,
+        transparent calc(100% - 10px),
+        #fff calc(100% - 9px)
+    );
+    margin: 0 auto;
 }
 
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* ===== ОСТАЛЬНЫЕ СТИЛИ (без изменений) ===== */
 * {
     box-sizing: border-box;
     margin: 0;
