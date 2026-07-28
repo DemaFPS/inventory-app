@@ -90,18 +90,20 @@
 }
 
 /* ===== ЭКРАН ЗАГРУЗКИ ===== */
+/* ИЗМЕНЕНО: прозрачный фон, цвет текста совпадает с лоадером */
 .loading-overlay {
     position: fixed;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
-    background: var(--bg-color);
+    background: transparent;
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 9999;
     transition: opacity 0.5s ease;
+    pointer-events: none;
 }
 .loading-overlay.hidden {
     opacity: 0;
@@ -109,6 +111,9 @@
 }
 .loading-content {
     text-align: center;
+}
+.loading-content .fw-bold {
+    color: var(--blob-1);   /* цвет совпадает с лоадером */
 }
 .custom-loader {
     width: 64px;
@@ -203,49 +208,77 @@ body {
 }
 
 /* ===== ХЕДЕР ДАШБОРДА ===== */
+/* ИЗМЕНЕНО: увеличен заголовок, увеличен отступ, увеличены кнопки */
 .dashboard-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
     flex-wrap: nowrap;
-    gap: 8px;
-    margin-bottom: 1rem;
+    gap: 2rem;                     /* увеличенный отступ между заголовком и кнопками */
+    margin-bottom: 1.5rem;
     min-width: 0;
 }
 .dashboard-header h4 {
     margin: 0;
     white-space: nowrap;
-    font-size: 1.2rem;
+    font-size: 2.2rem;             /* увеличенный заголовок */
     flex-shrink: 0;
 }
 .dashboard-header .user-controls {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 0.75rem;                  /* расстояние между самими кнопками – меньше, чем gap выше */
     flex-shrink: 0;
     white-space: nowrap;
 }
 .dashboard-header .user-controls .badge {
-    font-size: 0.75rem;
-    padding: 0.3rem 0.5rem;
+    font-size: 1rem;               /* увеличенный шрифт бейджа */
+    padding: 0.5rem 0.8rem;
     white-space: nowrap;
 }
 .dashboard-header .user-controls .btn {
-    padding: 0.2rem 0.4rem;
-    font-size: 0.8rem;
+    padding: 0.4rem 0.6rem;
+    font-size: 1rem;
     white-space: nowrap;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
+.dashboard-header .user-controls .btn i {
+    font-size: 1.6rem;             /* увеличенные иконки */
+}
+/* Адаптив для маленьких экранов */
 @media (max-width: 480px) {
-    .dashboard-header h4 { font-size: 1rem; }
-    .dashboard-header .user-controls .badge { font-size: 0.65rem; padding: 0.2rem 0.4rem; }
-    .dashboard-header .user-controls .btn { padding: 0.15rem 0.3rem; font-size: 0.7rem; }
+    .dashboard-header {
+        gap: 1rem;
+    }
+    .dashboard-header h4 {
+        font-size: 1.6rem;
+    }
+    .dashboard-header .user-controls .badge {
+        font-size: 0.85rem;
+        padding: 0.3rem 0.6rem;
+    }
+    .dashboard-header .user-controls .btn i {
+        font-size: 1.3rem;
+    }
 }
 @media (max-width: 380px) {
-    .dashboard-header h4 { font-size: 0.9rem; }
-    .dashboard-header .user-controls { gap: 4px; }
-    .dashboard-header .user-controls .badge { font-size: 0.6rem; padding: 0.15rem 0.3rem; }
-    .dashboard-header .user-controls .btn { padding: 0.1rem 0.2rem; font-size: 0.6rem; }
+    .dashboard-header h4 {
+        font-size: 1.3rem;
+    }
+    .dashboard-header .user-controls {
+        gap: 0.4rem;
+    }
+    .dashboard-header .user-controls .badge {
+        font-size: 0.7rem;
+        padding: 0.2rem 0.4rem;
+    }
+    .dashboard-header .user-controls .btn i {
+        font-size: 1.1rem;
+    }
 }
+/* Конец изменений хедера */
 
 /* ===== СТАТИСТИКА ===== */
 .stat-card {
