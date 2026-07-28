@@ -6,7 +6,7 @@
  */
 
 // ============================
-// 0. КОНФИГУРАЦИЯ FIREBASE (ЗАМЕНИТЕ НА СВОЙ)
+// 0. КОНФИГУРАЦИЯ FIREBASE
 // ============================
 const firebaseConfig = {
   apiKey: "AIzaSyCsPVf6XFCi9_dZlK53mqAXB9RjBGcfMnc",
@@ -22,9 +22,9 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 
 // ============================
-// 1. КОНФИГУРАЦИЯ ПРОКСИ (ЗАМЕНИТЕ НА СВОЙ URL)
+// 1. КОНФИГУРАЦИЯ ПРОКСИ
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwovTUnlgq7wyqgAum5umvBYc0Sgx_M4UUnFoKcBfhUBBUiG8fnIdiBtUMPB_bBt3Qp/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbw_JQ9HXzRxRCWtltVGK_zetb4m3ffnx7UESlR5DE76tkNd0fWcggeipun1kzev7t3Q/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -35,9 +35,7 @@ let currentDevice = null;
 let scannerInstance = null;
 let isScanning = false;
 let isInitializingScanner = false;
-let currentUser = null;           // объект пользователя Firebase
-
-// Имя пользователя для офлайн-режима (хранится в localStorage)
+let currentUser = null;
 let localUserName = localStorage.getItem('localUserName') || 'Аноним';
 
 // ============================
