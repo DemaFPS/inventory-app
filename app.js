@@ -6,24 +6,25 @@
  */
 
 // ============================
-// 0. КОНФИГУРАЦИЯ FIREBASE
+// 0. КОНФИГУРАЦИЯ FIREBASE (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
 const firebaseConfig = {
-  apiKey: "AIzaSy...",
-  authDomain: "your-project.firebaseapp.com",
-  projectId: "your-project-id",
-  storageBucket: "your-project.appspot.com",
-  messagingSenderId: "123456789",
-  appId: "1:123456789:web:abcdef"
+    apiKey: "AIzaSyCsPVf6XFCi9_dZlK53mqAXB9RjBGcfMnc",
+    authDomain: "inventory-app-8f696.firebaseapp.com",
+    projectId: "inventory-app-8f696",
+    storageBucket: "inventory-app-8f696.firebasestorage.app",
+    messagingSenderId: "8094390774",
+    appId: "1:8094390774:web:b1e63668361a7b61fd0fd7",
+    measurementId: "G-V8NQ4E7F8Y"
 };
 
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 
 // ============================
-// 1. КОНФИГУРАЦИЯ ПРОКСИ
+// 1. КОНФИГУРАЦИЯ ПРОКСИ (ЗАМЕНИТЕ НА СВОЙ URL)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbzCkYggkVTlzoMKZ9K4LsHkoPpSNMhE-idBp6NB28Nd1ukgux4S2LpMz3nCD3buUJo/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/ВАШ_НОВЫЙ_АДРЕС/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -35,6 +36,9 @@ let scannerInstance = null;
 let isScanning = false;
 let isInitializingScanner = false;
 let currentUser = null;           // объект пользователя Firebase
+
+// Имя пользователя для офлайн-режима (хранится в localStorage)
+let localUserName = localStorage.getItem('localUserName') || 'Аноним';
 
 // ============================
 // 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -147,6 +151,13 @@ function playBeep(success = true) {
 /** Вибрация */
 function vibrate(duration = 100) {
     if (navigator.vibrate) navigator.vibrate(duration);
+}
+
+/** Получить имя инициатора (сначала Firebase, потом локальное) */
+function getInitiatorName() {
+    if (currentUser && currentUser.displayName) return currentUser.displayName;
+    if (currentUser) return currentUser.uid.substring(0, 8);
+    return localUserName || 'Аноним';
 }
 
 // ============================
@@ -445,11 +456,9 @@ async function performDeviceAction(action, data = {}) {
         showToast('Некорректный инвентарный номер', 'danger');
         return;
     }
-    if (!currentUser) {
-        showToast('Пользователь не авторизован, действие не записано', 'danger');
-        return;
-    }
-    const initiator = currentUser.displayName || currentUser.uid || 'Аноним';
+
+    // Определяем инициатора
+    const initiator = getInitiatorName();
 
     const now = new Date();
     const dateStr = now.toLocaleDateString('ru-RU');
@@ -488,7 +497,6 @@ async function performDeviceAction(action, data = {}) {
             newHistoryEntry = `${timestamp} Списано (${data.comment || 'причина не указана'})`;
             break;
         case 'edit':
-            // редактирование – обновляем поля
             if (data.model) updates.model = data.model;
             if (data.serialNumber) updates.serialNumber = data.serialNumber;
             if (data.responsiblePerson !== undefined) updates.responsiblePerson = data.responsiblePerson;
@@ -769,25 +777,46 @@ document.addEventListener('DOMContentLoaded', async function() {
     auth.onAuthStateChanged(async user => {
         if (user) {
             currentUser = user;
-            // Попробуем получить displayName из профиля или зададим по умолчанию
+            // Если нет displayName, пробуем взять из localStorage
             if (!user.displayName) {
-                // Можно запросить ввод имени или установить uid
-                const name = prompt('Введите ваше имя (для отображения в истории):', user.uid.substring(0, 8));
-                if (name) {
-                    await user.updateProfile({ displayName: name });
-                    currentUser = user;
+                const savedName = localStorage.getItem('localUserName');
+                if (savedName && savedName !== 'Аноним') {
+                    try {
+                        await user.updateProfile({ displayName: savedName });
+                        currentUser = user;
+                    } catch (e) { /* ignore */ }
+                } else {
+                    // Если нет имени, запрашиваем
+                    const name = prompt('Введите ваше имя (для отображения в истории):', user.uid.substring(0, 8));
+                    if (name) {
+                        await user.updateProfile({ displayName: name });
+                        localStorage.setItem('localUserName', name);
+                        currentUser = user;
+                    }
                 }
+            } else {
+                // Если displayName уже есть, сохраняем в localStorage
+                localStorage.setItem('localUserName', user.displayName);
             }
             document.getElementById('userDisplay').textContent = currentUser.displayName || currentUser.uid || 'Аноним';
         } else {
-            // Анонимный вход
+            // Попытка анонимного входа
             try {
                 const cred = await auth.signInAnonymously();
                 currentUser = cred.user;
-                document.getElementById('userDisplay').textContent = 'Аноним';
+                // Проверяем, есть ли сохранённое имя
+                const savedName = localStorage.getItem('localUserName');
+                if (savedName && savedName !== 'Аноним') {
+                    try {
+                        await currentUser.updateProfile({ displayName: savedName });
+                    } catch (e) { /* ignore */ }
+                }
+                document.getElementById('userDisplay').textContent = currentUser.displayName || currentUser.uid || 'Аноним';
             } catch (e) {
                 console.error('Ошибка анонимного входа:', e);
-                showToast('Ошибка авторизации', 'danger');
+                // Если Firebase не доступен, используем локальное имя
+                document.getElementById('userDisplay').textContent = localUserName;
+                showToast('Режим офлайн: изменения будут сохранены локально', 'warning');
             }
         }
     });
@@ -884,13 +913,27 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     });
 
+    // Кнопка смены имени
+    document.getElementById('changeNameBtn')?.addEventListener('click', function() {
+        const newName = prompt('Введите ваше имя (для отображения в истории):', localUserName);
+        if (newName && newName.trim()) {
+            const name = newName.trim();
+            localStorage.setItem('localUserName', name);
+            localUserName = name;
+            if (currentUser) {
+                currentUser.updateProfile({ displayName: name }).catch(() => {});
+            }
+            document.getElementById('userDisplay').textContent = name;
+            showToast('Имя обновлено', 'success');
+        }
+    });
+
     // --- Карточка: редактирование ---
     document.getElementById('editBtn')?.addEventListener('click', function() {
         if (!currentDevice) {
             showToast('Устройство не выбрано', 'warning');
             return;
         }
-        // Заполняем поля модалки текущими данными
         document.getElementById('editModel').value = currentDevice.model || '';
         document.getElementById('editSerial').value = currentDevice.serialNumber || '';
         document.getElementById('editResponsible').value = currentDevice.responsiblePerson || '';
@@ -906,7 +949,6 @@ document.addEventListener('DOMContentLoaded', async function() {
         const responsible = document.getElementById('editResponsible').value.trim();
         const warranty = document.getElementById('editWarranty').value.trim();
         const status = document.getElementById('editStatus').value;
-        // Простая валидация даты
         if (warranty && !/^\d{2}\.\d{2}\.\d{4}$/.test(warranty)) {
             showToast('Неверный формат даты (ДД.ММ.ГГГГ)', 'danger');
             return;

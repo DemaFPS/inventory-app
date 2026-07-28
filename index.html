@@ -33,6 +33,9 @@
                     <h4>📋 Инвентаризация</h4>
                     <div>
                         <span id="userDisplay" class="badge bg-primary me-2" style="font-size:0.8rem;">Аноним</span>
+                        <button id="changeNameBtn" class="btn btn-outline-secondary btn-sm me-1" title="Сменить имя">
+                            <i class="bi bi-person"></i>
+                        </button>
                         <button id="refreshDataBtn" class="btn btn-outline-secondary btn-sm" title="Обновить данные">
                             <i class="bi bi-arrow-clockwise"></i>
                         </button>
@@ -178,7 +181,7 @@
                     </button>
                     <h5 class="mb-0">Отчёт</h5>
                 </div>
-                <!-- Фильтры (опционально) -->
+                <!-- Фильтры -->
                 <div class="mb-3">
                     <label class="form-label">Фильтр по кабинету</label>
                     <select id="reportCabinetFilter" class="form-select">
