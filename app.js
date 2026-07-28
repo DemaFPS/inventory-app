@@ -1,5 +1,6 @@
 /**
  * app.js – Оптимизированная версия с увеличенной длиной номера, улучшенной обработкой ошибок и экраном загрузки
+ * Версия с пятью категориями на главном экране и цветовой индикацией статусов.
  */
 
 // ============================
@@ -127,7 +128,7 @@ function formatDate(dateStr) {
     return String(dateStr);
 }
 
-// ===== НОВАЯ ФУНКЦИЯ (изменена) =====
+// ===== ФУНКЦИЯ ДЛЯ ЦВЕТА КАРТОЧКИ УСТРОЙСТВА =====
 function getStatusColorClass(device) {
     if (!device) return 'status-red';
     const status = device.status || '';
@@ -330,19 +331,52 @@ async function addDevice(deviceData) {
 }
 
 // ============================
-// 5. ДАШБОРД
+// 5. ДАШБОРД – ПЯТЬ КАТЕГОРИЙ
 // ============================
 function updateDashboardStats() {
     const total = inventoryData.length;
-    const expiring = inventoryData.filter(d => isWarrantyExpiring(d && d.warrantyEndDate)).length;
-    const inactive = inventoryData.filter(d => {
+
+    // В эксплуатации – статус "В эксплуатации"
+    const inUse = inventoryData.filter(d => {
         const status = d && d.status || '';
-        return status === 'Списан' || status === 'В ремонте';
+        return status === 'В эксплуатации';
     }).length;
 
+    // Гарантия истекает или уже истекла (diff <= 30)
+    const expiring = inventoryData.filter(d => {
+        const date = parseDateFromString(d && d.warrantyEndDate);
+        if (!date) return false;
+        const now = new Date();
+        const diff = (date - now) / (1000 * 60 * 60 * 24);
+        return diff <= 30;   // включает просроченные и истекающие в ближайшие 30 дней
+    }).length;
+
+    // В ремонте – статус "В ремонте"
+    const inRepair = inventoryData.filter(d => {
+        const status = d && d.status || '';
+        return status === 'В ремонте';
+    }).length;
+
+    // Списан / На складе – статусы "Списан" или "На складе"
+    const inactive = inventoryData.filter(d => {
+        const status = d && d.status || '';
+        return status === 'Списан' || status === 'На складе';
+    }).length;
+
+    // Обновляем DOM
     document.getElementById('totalCount').textContent = total;
+    document.getElementById('inUseCount').textContent = inUse;
     document.getElementById('expiringCount').textContent = expiring;
+    document.getElementById('repairCount').textContent = inRepair;
     document.getElementById('inactiveCount').textContent = inactive;
+
+    // ОТЛАДКА: выводим в консоль все даты для проверки парсинга
+    console.log('=== ОТЛАДКА ДАТ ===');
+    inventoryData.forEach(d => {
+        const parsed = parseDateFromString(d.warrantyEndDate);
+        console.log(`Инв. №: ${d.inventoryNumber}, Дата: ${d.warrantyEndDate}, Парсинг: ${parsed ? parsed.toLocaleDateString() : 'null'}`);
+    });
+    console.log('Всего:', total, 'В эксплуатации:', inUse, 'Гарантия истекает:', expiring, 'В ремонте:', inRepair, 'Списан/На складе:', inactive);
 }
 
 // ============================
