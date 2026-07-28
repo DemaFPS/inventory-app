@@ -205,6 +205,20 @@ body {
     padding: 12px 16px !important;
 }
 
+/* ===== УМЕНЬШЕННОЕ ПОЛЕ ВВОДА ===== */
+.manual-input .input-group {
+    max-width: 80%;
+    margin: 0 auto;
+}
+.manual-input .input-group input {
+    font-size: 0.9rem;
+    padding: 0.3rem 0.5rem;
+}
+.manual-input .input-group button {
+    font-size: 0.9rem;
+    padding: 0.3rem 0.7rem;
+}
+
 /* ===== КАРТОЧКА УСТРОЙСТВА ===== */
 .device-header {
     background: var(--device-header-bg);

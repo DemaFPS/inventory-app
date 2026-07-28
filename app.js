@@ -1,9 +1,5 @@
 /**
- * app.js – Оптимизированная версия
- * - QR-ссылки обрабатываются без задержек
- * - Поиск: сначала локально, потом сервер (с индикацией)
- * - Устранены дубликаты действий
- * - Нормализация номеров (удаление ведущих нулей)
+ * app.js – Оптимизированная версия с увеличенной длиной номера и улучшенной обработкой ошибок
  */
 
 // ============================
@@ -54,6 +50,9 @@ function showToast(message, type = 'success') {
     toast.show();
 }
 
+/**
+ * Нормализация: удаление ведущих нулей, приведение к верхнему регистру
+ */
 function normalizeInventoryNumber(str) {
     if (str === undefined || str === null) return '';
     let s = String(str).trim();
@@ -61,10 +60,13 @@ function normalizeInventoryNumber(str) {
     return s.toUpperCase();
 }
 
+/**
+ * Валидация: длина от 6 до 20 символов (увеличено с 12)
+ */
 function validateInventoryNumber(str) {
     if (str === undefined || str === null) return false;
     const original = String(str).trim();
-    if (original.length < 6 || original.length > 12) return false;
+    if (original.length < 6 || original.length > 20) return false;
     const regex = /^[A-Za-zА-Яа-я0-9]+(?:-[A-Za-zА-Яа-я0-9]+)?$/;
     if (!regex.test(original)) return false;
     return true;
@@ -170,7 +172,7 @@ function getInitiatorName() {
 }
 
 // ============================
-// 4. РАБОТА С ПРОКСИ
+// 4. РАБОТА С ПРОКСИ (С ОБРАБОТКОЙ ОШИБОК)
 // ============================
 async function callProxy(action, payload = {}) {
     try {
@@ -182,7 +184,14 @@ async function callProxy(action, payload = {}) {
         if (!response.ok) {
             throw new Error(`Ошибка HTTP: ${response.status}`);
         }
-        const data = await response.json();
+        const text = await response.text();
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (e) {
+            // Если ответ не JSON (например, "OK" или HTML-ошибка)
+            throw new Error(`Сервер вернул невалидный JSON: ${text.substring(0, 50)}`);
+        }
         if (!data || typeof data !== 'object') {
             throw new Error('Пустой или невалидный ответ от сервера');
         }
@@ -250,7 +259,7 @@ async function updateDevice(inventoryNumber, updates) {
         }
         return result;
     } catch (error) {
-        showToast('Ошибка обновления: ' + error.message, 'danger');
+        // Показываем ошибку, но не сохраняем в офлайн (это делает вызывающий код)
         throw error;
     }
 }
@@ -286,6 +295,8 @@ async function addDevice(deviceData) {
             if (e.message && (e.message.includes('уже существует') || e.message.includes('Duplicate'))) {
                 throw e;
             }
+            // Иначе игнорируем ошибку и продолжаем создание (возможно, проблема с сетью)
+            console.warn('Ошибка проверки на сервере, продолжаем создание:', e);
         }
     }
 
@@ -342,7 +353,7 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 6. СКАНЕР – БЫСТРЫЙ ПОИСК (сначала локально, потом сервер)
+// 6. СКАНЕР – СНАЧАЛА ЛОКАЛЬНО, ПОТОМ СЕРВЕР
 // ============================
 async function initScanner() {
     if (isInitializingScanner) return;
@@ -408,7 +419,7 @@ function onScanSuccess(decodedText, decodedResult) {
     let format = decodedResult?.result?.format || decodedResult?.format || '';
     console.log('Формат:', format);
 
-    // --- QR-код со ссылкой – сразу переход, без проверок ---
+    // --- QR-ссылка – мгновенный переход ---
     if (rawText.startsWith('http://') || rawText.startsWith('https://')) {
         console.log('QR-ссылка – диалог перехода');
         if (navigator.onLine) {
@@ -426,11 +437,10 @@ function onScanSuccess(decodedText, decodedResult) {
         return;
     }
 
-    // --- QR без ссылки или штрих-код – обрабатываем как номер ---
     const normalized = normalizeInventoryNumber(rawText);
     console.log('Поиск устройства по номеру:', normalized);
 
-    // 1. Сначала поиск в локальном кэше (мгновенно)
+    // 1. Локально
     let device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
     if (device) {
         console.log('Найдено локально:', device);
@@ -440,7 +450,7 @@ function onScanSuccess(decodedText, decodedResult) {
         return;
     }
 
-    // 2. Если нет интернета – сохраняем в офлайн
+    // 2. Офлайн
     if (!navigator.onLine) {
         savePendingScan(rawText, 'barcode');
         showToast('Нет интернета. Сканирование сохранено в журнале.', 'warning');
@@ -450,7 +460,7 @@ function onScanSuccess(decodedText, decodedResult) {
         return;
     }
 
-    // 3. Если есть интернет – загружаем свежие данные с сервера и ищем
+    // 3. Сервер
     showToast('Поиск на сервере...', 'info');
     loadInventory().then(() => {
         const found = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
@@ -460,12 +470,11 @@ function onScanSuccess(decodedText, decodedResult) {
             showScreen('deviceCard');
             renderDeviceCard(found);
         } else {
-            // Не найдено – предлагаем создать
             showCreateDeviceModal(rawText);
         }
     }).catch(err => {
         console.error('Ошибка загрузки с сервера:', err);
-        // В случае ошибки пробуем ещё раз локально (на случай, если кэш обновился)
+        // Пробуем ещё раз локально
         const cached = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
         if (cached) {
             currentDevice = cached;
@@ -488,12 +497,11 @@ function handleManualFind() {
         return;
     }
     if (!validateInventoryNumber(rawValue)) {
-        showToast('Неверный формат номера', 'danger');
+        showToast('Неверный формат номера (длина 6-20 символов, только буквы/цифры/дефис)', 'danger');
         return;
     }
     const normalized = normalizeInventoryNumber(rawValue);
-    
-    // Сначала локально
+
     let device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
     if (device) {
         currentDevice = device;
@@ -576,7 +584,7 @@ function renderDeviceCard(device) {
 }
 
 // ============================
-// 8. ОБРАБОТЧИКИ ДЕЙСТВИЙ (с защитой от дублирования)
+// 8. ОБРАБОТЧИКИ ДЕЙСТВИЙ (с правильным сохранением офлайн)
 // ============================
 async function performDeviceAction(action, data = {}) {
     if (!currentDevice) {
@@ -651,13 +659,16 @@ async function performDeviceAction(action, data = {}) {
     history += newHistoryEntry;
     updates.history = history;
 
+    // Сохраняем офлайн ТОЛЬКО если нет интернета
     if (!navigator.onLine) {
         savePendingAction(inv, updates);
         return;
     }
 
+    // Если интернет есть – пытаемся отправить
     try {
         await updateDevice(inv, updates);
+        // Обновляем карточку
         const updated = inventoryData.find(d => d && d.inventoryNumber === inv);
         if (updated) {
             currentDevice = updated;
@@ -673,12 +684,10 @@ async function performDeviceAction(action, data = {}) {
         updateDashboardStats();
         removePendingAction(inv);
     } catch (error) {
-        if (error.message && error.message.includes('не найдено')) {
-            removePendingAction(inv);
-            showToast('Устройство не найдено. Действие удалено из очереди.', 'warning');
-        } else {
-            savePendingAction(inv, updates);
-        }
+        // Если ошибка – показываем её, но НЕ сохраняем в офлайн (интернет есть)
+        showToast('Ошибка при выполнении действия: ' + error.message, 'danger');
+        // Не сохраняем в офлайн, т.к. интернет есть, но что-то пошло не так
+        // Пользователь может повторить позже вручную
     }
 }
 
@@ -758,7 +767,7 @@ function renderChecklist(cabinetName) {
 }
 
 // ============================
-// 10. ОФЛАЙН-РЕЖИМ И СИНХРОНИЗАЦИЯ (с защитой от дублирования)
+// 10. ОФЛАЙН-РЕЖИМ И СИНХРОНИЗАЦИЯ
 // ============================
 function savePendingScan(inventoryNumber, type = 'barcode') {
     let pending = JSON.parse(localStorage.getItem('pendingScans') || '[]');
@@ -781,7 +790,6 @@ function savePendingScan(inventoryNumber, type = 'barcode') {
 function savePendingAction(inventoryNumber, updates) {
     let pending = JSON.parse(localStorage.getItem('pendingActions') || '[]');
     if (!Array.isArray(pending)) pending = [];
-    // Проверяем, нет ли уже такого же действия для этого номера
     const exists = pending.some(item => item.inventoryNumber === inventoryNumber && JSON.stringify(item.updates) === JSON.stringify(updates));
     if (!exists) {
         pending.push({ inventoryNumber, updates, timestamp: new Date().toISOString() });
@@ -980,7 +988,7 @@ async function confirmCreateDevice() {
     const warranty = document.getElementById('createWarranty').value.trim();
 
     if (!inv || !validateInventoryNumber(inv)) {
-        showToast('Неверный инвентарный номер', 'danger');
+        showToast('Неверный инвентарный номер (длина 6-20 символов)', 'danger');
         return;
     }
     if (warranty && !/^\d{2}\.\d{2}\.\d{4}$/.test(warranty)) {
