@@ -1,0 +1,1059 @@
+/**
+ * app.js – Главный модуль мобильного приложения инвентаризации
+ * Использует Google Sheets API через прокси-сервер (Google Apps Script)
+ * 
+ * Версия с Firebase Auth, офлайн-синхронизацией, редактированием, звуком и вибрацией
+ */
+
+// ============================
+// 0. КОНФИГУРАЦИЯ FIREBASE
+// ============================
+const firebaseConfig = {
+  apiKey: "AIzaSy...",
+  authDomain: "your-project.firebaseapp.com",
+  projectId: "your-project-id",
+  storageBucket: "your-project.appspot.com",
+  messagingSenderId: "123456789",
+  appId: "1:123456789:web:abcdef"
+};
+
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+
+// ============================
+// 1. КОНФИГУРАЦИЯ ПРОКСИ
+// ============================
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbzCkYggkVTlzoMKZ9K4LsHkoPpSNMhE-idBp6NB28Nd1ukgux4S2LpMz3nCD3buUJo/exec';
+
+// ============================
+// 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
+// ============================
+let inventoryData = [];
+let cabinetsData = [];
+let currentDevice = null;
+let scannerInstance = null;
+let isScanning = false;
+let isInitializingScanner = false;
+let currentUser = null;           // объект пользователя Firebase
+
+// ============================
+// 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+// ============================
+
+/** Показать уведомление (toast) */
+function showToast(message, type = 'success') {
+    const toastEl = document.getElementById('liveToast');
+    if (!toastEl) return;
+    const toastBody = document.getElementById('toastMessage');
+    if (!toastBody) return;
+    toastBody.textContent = message;
+    toastEl.className = `toast align-items-center text-white border-0 bg-${type}`;
+    const toast = new bootstrap.Toast(toastEl, { delay: 3000 });
+    toast.show();
+}
+
+/** Валидация инвентарного номера */
+function validateInventoryNumber(str) {
+    if (!str || typeof str !== 'string') return false;
+    if (str.length < 6 || str.length > 12) return false;
+    const regex = /^[A-Za-zА-Яа-я0-9]+(?:-[A-Za-zА-Яа-я0-9]+)?$/;
+    if (!regex.test(str)) return false;
+    if (str.length < 6 || str.length > 12) return false;
+    return true;
+}
+
+/** Переключение экранов */
+function showScreen(screenId) {
+    if (!screenId) return;
+    document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
+    const target = document.getElementById(screenId);
+    if (target) target.classList.add('active');
+    
+    document.querySelectorAll('.nav-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.screen === screenId);
+    });
+    
+    if (screenId === 'scanner') {
+        initScanner();
+    } else {
+        stopScanner();
+    }
+    
+    if (screenId === 'dashboard') {
+        updateDashboardStats();
+    }
+    
+    setTimeout(updateActivePill, 50);
+}
+
+/** Форматирование даты */
+function formatDate(dateStr) {
+    if (!dateStr) return '—';
+    return dateStr;
+}
+
+/** Проверка, истекает ли гарантия (в течение 30 дней) */
+function isWarrantyExpiring(warrantyDateStr) {
+    if (!warrantyDateStr) return false;
+    const parts = warrantyDateStr.split('.');
+    if (parts.length !== 3) return false;
+    const date = new Date(parts[2], parts[1] - 1, parts[0]);
+    if (isNaN(date.getTime())) return false;
+    const now = new Date();
+    const diff = (date - now) / (1000 * 60 * 60 * 24);
+    return diff >= 0 && diff <= 30;
+}
+
+/** Проверка, просрочена ли гарантия */
+function isWarrantyExpired(warrantyDateStr) {
+    if (!warrantyDateStr) return false;
+    const parts = warrantyDateStr.split('.');
+    if (parts.length !== 3) return false;
+    const date = new Date(parts[2], parts[1] - 1, parts[0]);
+    if (isNaN(date.getTime())) return false;
+    return date < new Date();
+}
+
+/** Получить цветовой класс для статуса устройства */
+function getStatusColorClass(device) {
+    if (!device) return 'status-yellow';
+    const status = device.status || '';
+    if (status === 'Списан') return 'status-red';
+    if (status === 'В ремонте' || status === 'На складе') return 'status-yellow';
+    if (status === 'В эксплуатации') {
+        if (isWarrantyExpired(device.warrantyEndDate)) return 'status-red';
+        if (isWarrantyExpiring(device.warrantyEndDate)) return 'status-yellow';
+        return 'status-green';
+    }
+    return 'status-yellow';
+}
+
+/** Воспроизвести звуковой сигнал */
+function playBeep(success = true) {
+    try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = success ? 800 : 400;
+        osc.type = 'sine';
+        gain.gain.value = 0.15;
+        osc.start();
+        setTimeout(() => { osc.stop(); }, 200);
+    } catch (e) { /* ignore */ }
+}
+
+/** Вибрация */
+function vibrate(duration = 100) {
+    if (navigator.vibrate) navigator.vibrate(duration);
+}
+
+// ============================
+// 4. РАБОТА С ПРОКСИ (Google Sheets API)
+// ============================
+
+async function callProxy(action, payload = {}) {
+    try {
+        const response = await fetch(PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain' },
+            body: JSON.stringify({ action, payload })
+        });
+        if (!response.ok) {
+            throw new Error(`Ошибка HTTP: ${response.status}`);
+        }
+        const data = await response.json();
+        if (!data || typeof data !== 'object') {
+            throw new Error('Пустой или невалидный ответ от сервера');
+        }
+        if (!data.success) {
+            throw new Error(data.error || data.message || 'Неизвестная ошибка');
+        }
+        return data;
+    } catch (error) {
+        console.error('Ошибка прокси:', error);
+        throw error;
+    }
+}
+
+async function loadInventory() {
+    try {
+        const result = await callProxy('read');
+        inventoryData = Array.isArray(result.inventory) ? result.inventory : [];
+        cabinetsData = Array.isArray(result.cabinets) ? result.cabinets : [];
+        localStorage.setItem('inventoryCache', JSON.stringify(inventoryData));
+        localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
+        return { inventory: inventoryData, cabinets: cabinetsData };
+    } catch (error) {
+        console.warn('Ошибка загрузки, пробуем кэш:', error);
+        const cachedInv = localStorage.getItem('inventoryCache');
+        const cachedCab = localStorage.getItem('cabinetsCache');
+        if (cachedInv && cachedCab) {
+            try {
+                inventoryData = JSON.parse(cachedInv) || [];
+                cabinetsData = JSON.parse(cachedCab) || [];
+                showToast('Загружены данные из кэша (офлайн-режим)', 'warning');
+                return { inventory: inventoryData, cabinets: cabinetsData };
+            } catch (e) {
+                showToast('Ошибка чтения кэша', 'danger');
+                throw e;
+            }
+        }
+        showToast('Ошибка загрузки данных: ' + error.message, 'danger');
+        throw error;
+    }
+}
+
+async function updateDevice(inventoryNumber, updates) {
+    if (!validateInventoryNumber(inventoryNumber)) {
+        showToast('Неверный формат инвентарного номера', 'danger');
+        throw new Error('Invalid inventory number');
+    }
+    try {
+        const result = await callProxy('update', {
+            inventoryNumber,
+            updates
+        });
+        showToast(result.message || 'Устройство обновлено', 'success');
+        const idx = inventoryData.findIndex(d => d && d.inventoryNumber === inventoryNumber);
+        if (idx !== -1) {
+            inventoryData[idx] = { ...inventoryData[idx], ...updates };
+        }
+        localStorage.setItem('inventoryCache', JSON.stringify(inventoryData));
+        return result;
+    } catch (error) {
+        showToast('Ошибка обновления: ' + error.message, 'danger');
+        throw error;
+    }
+}
+
+// ============================
+// 5. МОДУЛЬ ДАШБОРДА
+// ============================
+
+function updateDashboardStats() {
+    const total = inventoryData.length;
+    const expiring = inventoryData.filter(d => isWarrantyExpiring(d && d.warrantyEndDate)).length;
+    const inactive = inventoryData.filter(d => {
+        const status = d && d.status || '';
+        return status === 'Списан' || status === 'В ремонте';
+    }).length;
+
+    const totalEl = document.getElementById('totalCount');
+    const expEl = document.getElementById('expiringCount');
+    const inactEl = document.getElementById('inactiveCount');
+    if (totalEl) totalEl.textContent = total;
+    if (expEl) expEl.textContent = expiring;
+    if (inactEl) inactEl.textContent = inactive;
+}
+
+// ============================
+// 6. МОДУЛЬ СКАНЕРА
+// ============================
+
+async function initScanner() {
+    if (isInitializingScanner) return;
+    if (scannerInstance && isScanning) return;
+
+    isInitializingScanner = true;
+    try {
+        if (typeof Html5Qrcode === 'undefined') {
+            throw new Error('Библиотека html5-qrcode не загружена.');
+        }
+        const readerElement = document.getElementById('reader');
+        if (!readerElement) {
+            throw new Error('Элемент #reader не найден');
+        }
+        if (scannerInstance) {
+            try {
+                await scannerInstance.stop();
+                await scannerInstance.clear();
+            } catch (e) { /* ignore */ }
+            scannerInstance = null;
+        }
+        readerElement.innerHTML = '';
+
+        scannerInstance = new Html5Qrcode("reader");
+        const config = {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            formatsToSupport: [
+                Html5QrcodeSupportedFormats.QR_CODE,
+                Html5QrcodeSupportedFormats.EAN_13
+            ]
+        };
+
+        await scannerInstance.start(
+            { facingMode: "environment" },
+            config,
+            onScanSuccess,
+            onScanError
+        );
+        isScanning = true;
+        isInitializingScanner = false;
+        console.log('Сканер запущен');
+    } catch (err) {
+        console.error('Ошибка запуска сканера:', err);
+        showToast('Не удалось получить доступ к камере: ' + err.message, 'danger');
+        document.querySelector('.manual-input').style.display = 'block';
+        isInitializingScanner = false;
+    }
+}
+
+function stopScanner() {
+    if (scannerInstance && isScanning) {
+        try {
+            scannerInstance.stop().then(() => {
+                isScanning = false;
+            }).catch(err => console.warn('Остановка сканера:', err));
+        } catch (e) {
+            console.warn('Ошибка при остановке сканера', e);
+        }
+    }
+}
+
+function onScanSuccess(decodedText, decodedResult) {
+    if (!decodedText) {
+        console.warn('Пустой результат сканирования');
+        return;
+    }
+    console.log('Распознано:', decodedText);
+    vibrate(100);
+    playBeep(true);
+    stopScanner();
+    
+    const invNumber = decodedText.trim();
+    if (validateInventoryNumber(invNumber)) {
+        const device = inventoryData.find(d => d && d.inventoryNumber === invNumber);
+        if (device) {
+            currentDevice = device;
+            showScreen('deviceCard');
+            renderDeviceCard(device);
+            return;
+        } else {
+            document.getElementById('scannerError')?.classList.remove('d-none');
+            setTimeout(() => {
+                document.getElementById('scannerError')?.classList.add('d-none');
+                if (document.getElementById('scanner').classList.contains('active')) {
+                    initScanner();
+                }
+            }, 2000);
+            savePendingScan(invNumber);
+        }
+    } else {
+        showToast('Неверный формат номера: ' + invNumber, 'warning');
+        setTimeout(() => {
+            if (document.getElementById('scanner').classList.contains('active')) {
+                initScanner();
+            }
+        }, 1000);
+    }
+}
+
+function onScanError(err) {
+    // игнорируем
+}
+
+// Ручной ввод
+function handleManualFind() {
+    const input = document.getElementById('manualInvInput');
+    if (!input) return;
+    const value = input.value.trim();
+    if (!value) {
+        showToast('Введите инвентарный номер', 'warning');
+        return;
+    }
+    if (!validateInventoryNumber(value)) {
+        showToast('Неверный формат номера', 'danger');
+        return;
+    }
+    const device = inventoryData.find(d => d && d.inventoryNumber === value);
+    if (device) {
+        currentDevice = device;
+        showScreen('deviceCard');
+        renderDeviceCard(device);
+        stopScanner();
+    } else {
+        document.getElementById('scannerError')?.classList.remove('d-none');
+        setTimeout(() => {
+            document.getElementById('scannerError')?.classList.add('d-none');
+        }, 2000);
+        savePendingScan(value);
+    }
+}
+
+// ============================
+// 7. МОДУЛЬ КАРТОЧКИ УСТРОЙСТВА
+// ============================
+
+function renderDeviceCard(device) {
+    if (!device) {
+        showToast('Ошибка: устройство не найдено', 'danger');
+        return;
+    }
+    const setText = (id, text) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text !== undefined && text !== null ? text : '—';
+    };
+    
+    setText('deviceInventory', 'Инв. № ' + (device.inventoryNumber || ''));
+    setText('deviceModel', device.model || '—');
+    setText('deviceSerial', device.serialNumber || '—');
+    setText('deviceStatus', device.status || '—');
+    setText('deviceResponsible', device.responsiblePerson || '—');
+    setText('deviceWarranty', formatDate(device.warrantyEndDate));
+    setText('deviceLastModified', device.lastModified || '—');
+    setText('deviceInitiator', device.initiator || '—');
+
+    const historyContainer = document.getElementById('deviceHistory');
+    if (historyContainer) {
+        if (device.history) {
+            const entries = device.history.split(';').filter(s => s.trim());
+            if (entries.length) {
+                historyContainer.innerHTML = entries.map(e => `<div class="small">${e.trim()}</div>`).join('');
+            } else {
+                historyContainer.innerHTML = '<div class="text-muted small">Нет записей</div>';
+            }
+        } else {
+            historyContainer.innerHTML = '<div class="text-muted small">Нет записей</div>';
+        }
+    }
+
+    const header = document.getElementById('deviceStatusIndicator');
+    if (header) {
+        const colorClass = getStatusColorClass(device);
+        header.className = `device-header d-flex align-items-center p-3 rounded mb-3 ${colorClass}`;
+    }
+    const dot = document.getElementById('statusDot');
+    if (dot) dot.className = 'status-dot me-3';
+
+    currentDevice = device;
+}
+
+// ============================
+// 8. ОБРАБОТЧИКИ ДЕЙСТВИЙ
+// ============================
+
+async function performDeviceAction(action, data = {}) {
+    if (!currentDevice) {
+        showToast('Устройство не выбрано', 'warning');
+        return;
+    }
+    const inv = currentDevice.inventoryNumber;
+    if (!inv) {
+        showToast('Некорректный инвентарный номер', 'danger');
+        return;
+    }
+    if (!currentUser) {
+        showToast('Пользователь не авторизован, действие не записано', 'danger');
+        return;
+    }
+    const initiator = currentUser.displayName || currentUser.uid || 'Аноним';
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('ru-RU');
+    const timeStr = now.toLocaleTimeString('ru-RU');
+    const timestamp = `${dateStr} ${timeStr}`;
+
+    let updates = {
+        lastModified: timestamp,
+        initiator: initiator
+    };
+
+    let history = currentDevice.history || '';
+    let newHistoryEntry = '';
+
+    switch (action) {
+        case 'transfer':
+            if (!data.fio) {
+                showToast('Не указано ФИО сотрудника', 'warning');
+                return;
+            }
+            updates.responsiblePerson = data.fio;
+            newHistoryEntry = `${timestamp} Передано сотруднику ${data.fio} (${data.comment || 'без комментария'})`;
+            break;
+        case 'repair':
+            updates.status = 'В ремонте';
+            newHistoryEntry = `${timestamp} Отправлено в ремонт (${data.comment || 'без комментария'})`;
+            break;
+        case 'stock':
+            updates.status = 'На складе';
+            updates.responsiblePerson = '';
+            newHistoryEntry = `${timestamp} Перемещено на склад (${data.comment || 'без комментария'})`;
+            break;
+        case 'scrap':
+            updates.status = 'Списан';
+            updates.responsiblePerson = '';
+            newHistoryEntry = `${timestamp} Списано (${data.comment || 'причина не указана'})`;
+            break;
+        case 'edit':
+            // редактирование – обновляем поля
+            if (data.model) updates.model = data.model;
+            if (data.serialNumber) updates.serialNumber = data.serialNumber;
+            if (data.responsiblePerson !== undefined) updates.responsiblePerson = data.responsiblePerson;
+            if (data.warrantyEndDate) updates.warrantyEndDate = data.warrantyEndDate;
+            if (data.status) updates.status = data.status;
+            newHistoryEntry = `${timestamp} Отредактированы данные (${data.comment || 'без комментария'})`;
+            break;
+        default:
+            showToast('Неизвестное действие', 'danger');
+            return;
+    }
+
+    if (history) history += '; ';
+    history += newHistoryEntry;
+    updates.history = history;
+
+    // Сохраняем в очередь офлайн
+    if (!navigator.onLine) {
+        savePendingAction(inv, updates);
+        return;
+    }
+
+    try {
+        await updateDevice(inv, updates);
+        // Перезагружаем карточку
+        const updated = inventoryData.find(d => d && d.inventoryNumber === inv);
+        if (updated) {
+            currentDevice = updated;
+            renderDeviceCard(updated);
+        } else {
+            await loadInventory();
+            const reloaded = inventoryData.find(d => d && d.inventoryNumber === inv);
+            if (reloaded) {
+                currentDevice = reloaded;
+                renderDeviceCard(reloaded);
+            }
+        }
+    } catch (error) {
+        savePendingAction(inv, updates);
+    }
+}
+
+// ============================
+// 9. МОДУЛЬ ОБОРОТНОЙ ВЕДОМОСТИ
+// ============================
+
+async function loadCabinetSelect() {
+    const select = document.getElementById('cabinetSelect');
+    if (!select) return;
+    select.innerHTML = '<option value="">— Выберите кабинет —</option>';
+    if (cabinetsData.length === 0) {
+        await loadInventory();
+    }
+    cabinetsData.forEach(cab => {
+        if (!cab || !cab.cabinet) return;
+        const opt = document.createElement('option');
+        opt.value = cab.cabinet;
+        opt.textContent = cab.cabinet;
+        select.appendChild(opt);
+    });
+    // Также заполним фильтр отчёта
+    const reportFilter = document.getElementById('reportCabinetFilter');
+    if (reportFilter) {
+        reportFilter.innerHTML = '<option value="">Все кабинеты</option>';
+        cabinetsData.forEach(cab => {
+            if (!cab || !cab.cabinet) return;
+            const opt = document.createElement('option');
+            opt.value = cab.cabinet;
+            opt.textContent = cab.cabinet;
+            reportFilter.appendChild(opt);
+        });
+    }
+}
+
+function renderChecklist(cabinetName) {
+    if (!cabinetName) return;
+    const cabinet = cabinetsData.find(c => c && c.cabinet === cabinetName);
+    if (!cabinet) {
+        document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Кабинет не найден</div>';
+        document.getElementById('progressText').textContent = '0 из 0';
+        document.getElementById('progressBar').style.width = '0%';
+        document.getElementById('progressBar').textContent = '0%';
+        return;
+    }
+
+    const invNumbers = Array.isArray(cabinet.inventoryNumbers) ? cabinet.inventoryNumbers : [];
+    let found = 0;
+    let itemsHtml = '';
+
+    invNumbers.forEach(num => {
+        const exists = inventoryData.some(d => d && d.inventoryNumber === num && d.status !== 'Списан');
+        if (exists) found++;
+        const statusClass = exists ? 'list-group-item-success' : 'list-group-item-danger';
+        const statusText = exists ? '✓ Найдено' : '✗ Не найдено';
+        itemsHtml += `
+            <div class="list-group-item d-flex justify-content-between align-items-center ${statusClass}">
+                <span>${num}</span>
+                <span class="badge bg-${exists ? 'success' : 'danger'}">${statusText}</span>
+            </div>
+        `;
+    });
+
+    document.getElementById('checklistItems').innerHTML = itemsHtml;
+    const total = invNumbers.length;
+    document.getElementById('progressText').textContent = `${found} из ${total}`;
+    const percent = total ? Math.round((found / total) * 100) : 0;
+    document.getElementById('progressBar').style.width = percent + '%';
+    document.getElementById('progressBar').textContent = percent + '%';
+    document.getElementById('progressBar').setAttribute('aria-valuenow', percent);
+}
+
+// ============================
+// 10. ОФЛАЙН-РЕЖИМ (LocalStorage)
+// ============================
+
+function savePendingScan(inventoryNumber) {
+    let pending = JSON.parse(localStorage.getItem('pendingScans') || '[]');
+    if (!Array.isArray(pending)) pending = [];
+    pending.push({ inventoryNumber, timestamp: new Date().toISOString(), action: 'scanned' });
+    localStorage.setItem('pendingScans', JSON.stringify(pending));
+    showToast('Сканирование сохранено офлайн', 'warning');
+}
+
+function savePendingAction(inventoryNumber, updates) {
+    let pending = JSON.parse(localStorage.getItem('pendingActions') || '[]');
+    if (!Array.isArray(pending)) pending = [];
+    pending.push({ inventoryNumber, updates, timestamp: new Date().toISOString() });
+    localStorage.setItem('pendingActions', JSON.stringify(pending));
+    showToast('Действие сохранено офлайн', 'warning');
+}
+
+async function syncPendingData() {
+    if (!navigator.onLine) return;
+    
+    // Синхронизация сканирований (можно просто отметить как обработанные)
+    const pendingScans = JSON.parse(localStorage.getItem('pendingScans') || '[]');
+    if (pendingScans.length) {
+        localStorage.removeItem('pendingScans');
+        showToast(`Обработано ${pendingScans.length} отложенных сканирований`, 'info');
+    }
+
+    // Синхронизация действий
+    const pendingActions = JSON.parse(localStorage.getItem('pendingActions') || '[]');
+    if (!pendingActions.length) return;
+    
+    const failed = [];
+    for (const item of pendingActions) {
+        try {
+            await updateDevice(item.inventoryNumber, item.updates);
+            // успешно – не добавляем в failed
+        } catch (e) {
+            failed.push(item);
+        }
+    }
+    
+    if (failed.length === 0) {
+        localStorage.removeItem('pendingActions');
+        showToast('Все отложенные действия синхронизированы', 'success');
+    } else {
+        localStorage.setItem('pendingActions', JSON.stringify(failed));
+        showToast(`Синхронизировано ${pendingActions.length - failed.length} из ${pendingActions.length}`, 'warning');
+    }
+}
+
+// ============================
+// 11. МОДУЛЬ ОТЧЁТА
+// ============================
+
+function generateCSV(data) {
+    if (!data || !Array.isArray(data) || data.length === 0) return '';
+    const headers = ['Инвентарный номер', 'Серийный номер', 'Модель', 'Статус', 'Ответственное лицо', 'Дата окончания гарантии', 'История перемещений', 'Последнее изменение', 'Инициатор'];
+    let csv = headers.join(',') + '\n';
+    data.forEach(d => {
+        if (!d) return;
+        const row = [
+            d.inventoryNumber || '',
+            d.serialNumber || '',
+            d.model || '',
+            d.status || '',
+            d.responsiblePerson || '',
+            d.warrantyEndDate || '',
+            (d.history || '').replace(/;/g, ','),
+            d.lastModified || '',
+            d.initiator || ''
+        ];
+        csv += row.join(',') + '\n';
+    });
+    return csv;
+}
+
+function downloadCSV(csv) {
+    if (!csv) {
+        showToast('Нет данных для выгрузки', 'warning');
+        return;
+    }
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.href = url;
+    link.setAttribute('download', 'inventory_report.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}
+
+function printReport() {
+    if (!inventoryData || inventoryData.length === 0) {
+        showToast('Нет данных для печати', 'warning');
+        return;
+    }
+    // Применяем фильтр по кабинету, если выбран
+    const cabinetFilter = document.getElementById('reportCabinetFilter')?.value;
+    let filteredData = inventoryData;
+    if (cabinetFilter) {
+        const cabinet = cabinetsData.find(c => c && c.cabinet === cabinetFilter);
+        if (cabinet && Array.isArray(cabinet.inventoryNumbers)) {
+            filteredData = inventoryData.filter(d => cabinet.inventoryNumbers.includes(d.inventoryNumber));
+        }
+    }
+    if (filteredData.length === 0) {
+        showToast('Нет данных для выбранного кабинета', 'warning');
+        return;
+    }
+
+    const printDiv = document.createElement('div');
+    printDiv.id = 'report-print-content';
+    printDiv.style.display = 'none';
+    document.body.appendChild(printDiv);
+
+    let tableHtml = `<table class="table table-bordered table-striped"><thead><tr>
+        <th>Инв. номер</th><th>Серийный</th><th>Модель</th><th>Статус</th>
+        <th>Ответственный</th><th>Гарантия до</th><th>История</th>
+    </tr></thead><tbody>`;
+    filteredData.forEach(d => {
+        if (!d) return;
+        tableHtml += `<tr><td>${d.inventoryNumber}</td><td>${d.serialNumber || ''}</td>
+            <td>${d.model || ''}</td><td>${d.status || ''}</td>
+            <td>${d.responsiblePerson || ''}</td>
+            <td>${d.warrantyEndDate || ''}</td>
+            <td>${(d.history || '').replace(/;/g, ', ')}</td></tr>`;
+    });
+    tableHtml += '</tbody></table>';
+    printDiv.innerHTML = tableHtml;
+
+    printDiv.style.display = 'block';
+    window.print();
+    printDiv.style.display = 'none';
+    document.body.removeChild(printDiv);
+}
+
+// ============================
+// 12. НАСТРОЙКА ТЕМЫ И НАВИГАЦИИ (PILL)
+// ============================
+
+let navButtons = [];
+let activePill = null;
+
+function updateActivePill(smooth = true) {
+    if (!activePill) return;
+    const active = document.querySelector('.nav-btn.active');
+    if (!active) return;
+    if (!smooth) {
+        activePill.style.transition = 'none';
+    } else {
+        activePill.style.transition = 'transform 0.45s cubic-bezier(0.16, 1, 0.3, 1), width 0.45s cubic-bezier(0.16, 1, 0.3, 1)';
+    }
+    activePill.style.width = active.offsetWidth + 'px';
+    activePill.style.transform = `translateX(${active.offsetLeft}px)`;
+}
+
+// ============================
+// 13. ИНИЦИАЛИЗАЦИЯ ПРИ ЗАГРУЗКЕ
+// ============================
+
+document.addEventListener('DOMContentLoaded', async function() {
+    // --- Firebase Auth ---
+    auth.onAuthStateChanged(async user => {
+        if (user) {
+            currentUser = user;
+            // Попробуем получить displayName из профиля или зададим по умолчанию
+            if (!user.displayName) {
+                // Можно запросить ввод имени или установить uid
+                const name = prompt('Введите ваше имя (для отображения в истории):', user.uid.substring(0, 8));
+                if (name) {
+                    await user.updateProfile({ displayName: name });
+                    currentUser = user;
+                }
+            }
+            document.getElementById('userDisplay').textContent = currentUser.displayName || currentUser.uid || 'Аноним';
+        } else {
+            // Анонимный вход
+            try {
+                const cred = await auth.signInAnonymously();
+                currentUser = cred.user;
+                document.getElementById('userDisplay').textContent = 'Аноним';
+            } catch (e) {
+                console.error('Ошибка анонимного входа:', e);
+                showToast('Ошибка авторизации', 'danger');
+            }
+        }
+    });
+
+    // --- Загрузка данных ---
+    try {
+        await loadInventory();
+        updateDashboardStats();
+        await loadCabinetSelect();
+        await syncPendingData();
+    } catch (e) {
+        console.error('Ошибка инициализации:', e);
+        showToast('Ошибка загрузки данных. Проверьте интернет.', 'danger');
+    }
+
+    // --- Настройка темы ---
+    const themeToggle = document.getElementById('themeToggle');
+    const root = document.documentElement;
+    const savedTheme = localStorage.getItem('appTheme');
+    if (savedTheme) {
+        root.setAttribute('data-theme', savedTheme);
+    } else {
+        root.setAttribute('data-theme', 'light');
+    }
+    if (themeToggle) {
+        themeToggle.addEventListener('click', () => {
+            const current = root.getAttribute('data-theme');
+            const newTheme = current === 'dark' ? 'light' : 'dark';
+            root.setAttribute('data-theme', newTheme);
+            localStorage.setItem('appTheme', newTheme);
+            setTimeout(updateActivePill, 100);
+        });
+    }
+
+    // --- Настройка навигации (pill) ---
+    activePill = document.getElementById('active-pill');
+    navButtons = document.querySelectorAll('.nav-btn');
+    
+    navButtons.forEach(btn => {
+        btn.addEventListener('click', function() {
+            navButtons.forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            updateActivePill(true);
+            const screen = this.dataset.screen;
+            if (screen) showScreen(screen);
+        });
+    });
+
+    window.addEventListener('load', () => {
+        setTimeout(() => updateActivePill(false), 100);
+    });
+    window.addEventListener('resize', () => updateActivePill(false));
+
+    // --- Назначение обработчиков кнопок ---
+    document.getElementById('scanBtn')?.addEventListener('click', () => showScreen('scanner'));
+    document.getElementById('checklistBtn')?.addEventListener('click', () => {
+        showScreen('checklist');
+        if (cabinetsData.length === 0) loadCabinetSelect();
+    });
+    document.getElementById('reportBtn')?.addEventListener('click', () => showScreen('report'));
+
+    document.getElementById('backFromScanner')?.addEventListener('click', () => {
+        stopScanner();
+        showScreen('dashboard');
+    });
+    document.getElementById('backFromDevice')?.addEventListener('click', () => {
+        currentDevice = null;
+        showScreen('dashboard');
+    });
+    document.getElementById('backFromChecklist')?.addEventListener('click', () => showScreen('dashboard'));
+    document.getElementById('backFromReport')?.addEventListener('click', () => showScreen('dashboard'));
+
+    // Ручной ввод
+    document.getElementById('manualFindBtn')?.addEventListener('click', handleManualFind);
+    document.getElementById('manualInvInput')?.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') handleManualFind();
+    });
+
+    // Кнопка обновления данных на дашборде
+    document.getElementById('refreshDataBtn')?.addEventListener('click', async function() {
+        try {
+            await loadInventory();
+            updateDashboardStats();
+            if (currentDevice) {
+                const updated = inventoryData.find(d => d && d.inventoryNumber === currentDevice.inventoryNumber);
+                if (updated) {
+                    currentDevice = updated;
+                    renderDeviceCard(updated);
+                }
+            }
+            showToast('Данные обновлены', 'success');
+        } catch (e) {
+            showToast('Ошибка обновления', 'danger');
+        }
+    });
+
+    // --- Карточка: редактирование ---
+    document.getElementById('editBtn')?.addEventListener('click', function() {
+        if (!currentDevice) {
+            showToast('Устройство не выбрано', 'warning');
+            return;
+        }
+        // Заполняем поля модалки текущими данными
+        document.getElementById('editModel').value = currentDevice.model || '';
+        document.getElementById('editSerial').value = currentDevice.serialNumber || '';
+        document.getElementById('editResponsible').value = currentDevice.responsiblePerson || '';
+        document.getElementById('editWarranty').value = currentDevice.warrantyEndDate || '';
+        document.getElementById('editStatus').value = currentDevice.status || 'В эксплуатации';
+        const modal = new bootstrap.Modal(document.getElementById('editModal'));
+        modal.show();
+    });
+
+    document.getElementById('confirmEdit')?.addEventListener('click', async function() {
+        const model = document.getElementById('editModel').value.trim();
+        const serial = document.getElementById('editSerial').value.trim();
+        const responsible = document.getElementById('editResponsible').value.trim();
+        const warranty = document.getElementById('editWarranty').value.trim();
+        const status = document.getElementById('editStatus').value;
+        // Простая валидация даты
+        if (warranty && !/^\d{2}\.\d{2}\.\d{4}$/.test(warranty)) {
+            showToast('Неверный формат даты (ДД.ММ.ГГГГ)', 'danger');
+            return;
+        }
+        const updates = { model, serialNumber: serial, responsiblePerson: responsible, warrantyEndDate: warranty, status };
+        const modal = bootstrap.Modal.getInstance(document.getElementById('editModal'));
+        if (modal) modal.hide();
+        await performDeviceAction('edit', updates);
+    });
+
+    // --- Карточка: передача ---
+    document.getElementById('transferBtn')?.addEventListener('click', function() {
+        if (!currentDevice) {
+            showToast('Устройство не выбрано', 'warning');
+            return;
+        }
+        const modal = new bootstrap.Modal(document.getElementById('transferModal'));
+        modal.show();
+    });
+    document.getElementById('confirmTransfer')?.addEventListener('click', async function() {
+        const fio = document.getElementById('transferFio')?.value.trim();
+        const comment = document.getElementById('transferComment')?.value.trim();
+        if (!fio || !comment) {
+            showToast('Заполните все поля', 'warning');
+            return;
+        }
+        const modal = bootstrap.Modal.getInstance(document.getElementById('transferModal'));
+        if (modal) modal.hide();
+        await performDeviceAction('transfer', { fio, comment });
+        document.getElementById('transferFio').value = '';
+        document.getElementById('transferComment').value = '';
+    });
+
+    // --- Карточка: ремонт ---
+    document.getElementById('repairBtn')?.addEventListener('click', async function() {
+        if (!currentDevice) {
+            showToast('Устройство не выбрано', 'warning');
+            return;
+        }
+        const comment = prompt('Введите причину отправки в ремонт (необязательно):');
+        await performDeviceAction('repair', { comment: comment || 'Без комментария' });
+    });
+
+    // --- Карточка: склад ---
+    document.getElementById('stockBtn')?.addEventListener('click', async function() {
+        if (!currentDevice) {
+            showToast('Устройство не выбрано', 'warning');
+            return;
+        }
+        const comment = prompt('Введите комментарий (необязательно):');
+        await performDeviceAction('stock', { comment: comment || 'Без комментария' });
+    });
+
+    // --- Карточка: списание ---
+    document.getElementById('scrapBtn')?.addEventListener('click', function() {
+        if (!currentDevice) {
+            showToast('Устройство не выбрано', 'warning');
+            return;
+        }
+        document.getElementById('scrapInventory').textContent = currentDevice.inventoryNumber;
+        const modal = new bootstrap.Modal(document.getElementById('scrapModal'));
+        modal.show();
+    });
+    document.getElementById('confirmScrap')?.addEventListener('click', async function() {
+        const comment = document.getElementById('scrapComment')?.value.trim();
+        const modal = bootstrap.Modal.getInstance(document.getElementById('scrapModal'));
+        if (modal) modal.hide();
+        await performDeviceAction('scrap', { comment: comment || 'Причина не указана' });
+        document.getElementById('scrapComment').value = '';
+    });
+
+    // --- Оборотная ведомость ---
+    document.getElementById('cabinetSelect')?.addEventListener('change', function() {
+        const cabinet = this.value;
+        if (cabinet) {
+            renderChecklist(cabinet);
+        } else {
+            document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Выберите кабинет</div>';
+            document.getElementById('progressText').textContent = '0 из 0';
+            document.getElementById('progressBar').style.width = '0%';
+            document.getElementById('progressBar').textContent = '0%';
+        }
+    });
+    document.getElementById('refreshChecklistBtn')?.addEventListener('click', function() {
+        const cabinet = document.getElementById('cabinetSelect')?.value;
+        if (cabinet) {
+            renderChecklist(cabinet);
+            showToast('Обновлено', 'success');
+        }
+    });
+
+    // --- Отчёт ---
+    document.getElementById('downloadCsvBtn')?.addEventListener('click', function() {
+        const cabinetFilter = document.getElementById('reportCabinetFilter')?.value;
+        let filteredData = inventoryData;
+        if (cabinetFilter) {
+            const cabinet = cabinetsData.find(c => c && c.cabinet === cabinetFilter);
+            if (cabinet && Array.isArray(cabinet.inventoryNumbers)) {
+                filteredData = inventoryData.filter(d => cabinet.inventoryNumbers.includes(d.inventoryNumber));
+            }
+        }
+        const csv = generateCSV(filteredData);
+        if (csv) {
+            downloadCSV(csv);
+        } else {
+            showToast('Нет данных для выгрузки', 'warning');
+        }
+    });
+    document.getElementById('printPdfBtn')?.addEventListener('click', printReport);
+
+    // --- Помощь ---
+    document.getElementById('helpBtn')?.addEventListener('click', function() {
+        const modal = new bootstrap.Modal(document.getElementById('helpModal'));
+        modal.show();
+    });
+
+    // --- Автоматическая синхронизация при восстановлении сети ---
+    window.addEventListener('online', function() {
+        syncPendingData();
+        loadInventory().then(() => {
+            updateDashboardStats();
+            if (currentDevice) {
+                const updated = inventoryData.find(d => d && d.inventoryNumber === currentDevice.inventoryNumber);
+                if (updated) {
+                    currentDevice = updated;
+                    renderDeviceCard(updated);
+                }
+            }
+        });
+    });
+
+    // --- Периодическая проверка (каждые 2 минуты) ---
+    setInterval(() => {
+        if (navigator.onLine) {
+            loadInventory().then(() => {
+                updateDashboardStats();
+                if (currentDevice) {
+                    const updated = inventoryData.find(d => d && d.inventoryNumber === currentDevice.inventoryNumber);
+                    if (updated) {
+                        currentDevice = updated;
+                        renderDeviceCard(updated);
+                    }
+                }
+            });
+        }
+    }, 120000);
+
+    // --- Показываем дашборд по умолчанию ---
+    showScreen('dashboard');
+});
