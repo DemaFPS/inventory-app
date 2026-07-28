@@ -379,6 +379,74 @@
         </div>
     </div>
 
+    <!-- Модалка перехода по QR-ссылке -->
+    <div class="modal fade" id="qrLinkModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">QR-код содержит ссылку</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Вы отсканировали QR-код со ссылкой:</p>
+                    <p><code id="qrLinkText" style="word-break: break-all;"></code></p>
+                    <p>Желаете перейти по ней?</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <a id="qrLinkHref" href="#" target="_blank" class="btn btn-primary" data-bs-dismiss="modal">Перейти</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модалка создания нового устройства -->
+    <div class="modal fade" id="createDeviceModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Создать новое устройство</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label>Инвентарный номер *</label>
+                        <input id="createInventoryNumber" class="form-control" readonly>
+                    </div>
+                    <div class="mb-2">
+                        <label>Модель</label>
+                        <input id="createModel" class="form-control" placeholder="Модель">
+                    </div>
+                    <div class="mb-2">
+                        <label>Серийный номер</label>
+                        <input id="createSerial" class="form-control" placeholder="SN12345">
+                    </div>
+                    <div class="mb-2">
+                        <label>Статус</label>
+                        <select id="createStatus" class="form-select">
+                            <option value="В эксплуатации">В эксплуатации</option>
+                            <option value="В ремонте">В ремонте</option>
+                            <option value="На складе">На складе</option>
+                            <option value="Списан">Списан</option>
+                        </select>
+                    </div>
+                    <div class="mb-2">
+                        <label>Ответственное лицо</label>
+                        <input id="createResponsible" class="form-control" placeholder="ФИО">
+                    </div>
+                    <div class="mb-2">
+                        <label>Дата окончания гарантии (ДД.ММ.ГГГГ)</label>
+                        <input id="createWarranty" class="form-control" placeholder="01.01.2026">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="button" id="confirmCreateDevice" class="btn btn-success">Создать</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Модалка помощи (инструкция) -->
     <div class="modal fade" id="helpModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-scrollable">
@@ -389,14 +457,15 @@
                 </div>
                 <div class="modal-body">
                     <ol>
-                        <li><strong>Авторизация</strong> – при первом запуске вы будете анонимно авторизованы. Для отображения вашего имени в истории нажмите на значок пользователя (если есть) или введите имя в настройках.</li>
-                        <li><strong>Сканирование</strong> – нажмите «Сканировать», поднесите камеру к QR-коду или штрих-коду (EAN-13). При успехе откроется карточка устройства.</li>
-                        <li><strong>Карточка</strong> – показывает все данные. Кнопки внизу позволяют изменить статус, передать сотруднику, отправить в ремонт, на склад или списать. Обязательно заполняйте комментарий.</li>
-                        <li><strong>Оборотная ведомость</strong> – выберите кабинет, увидите список инвентарных номеров с индикацией наличия. Прогресс-бар покажет процент найденных устройств.</li>
-                        <li><strong>Отчёт</strong> – выгрузите все данные в CSV или распечатайте (PDF). Можно отфильтровать по кабинету.</li>
+                        <li><strong>Авторизация</strong> – при первом запуске вы будете анонимно авторизованы. Для отображения вашего имени в истории нажмите на значок пользователя и введите имя.</li>
+                        <li><strong>Сканирование</strong> – нажмите «Сканировать», поднесите камеру к QR-коду или штрих-коду (EAN-13). QR-код со ссылкой предложит перейти по ней. Штрих-код ищет устройство в базе.</li>
+                        <li><strong>Если устройство не найдено</strong> – при наличии интернета будет предложено создать новое устройство. При отсутствии интернета сканирование сохранится в журнал.</li>
+                        <li><strong>Карточка</strong> – показывает все данные. Кнопки внизу позволяют изменить статус, передать сотруднику, отправить в ремонт, на склад или списать.</li>
+                        <li><strong>Оборотная ведомость</strong> – выберите кабинет, увидите список инвентарных номеров с индикацией наличия.</li>
+                        <li><strong>Отчёт</strong> – выгрузите данные в CSV или распечатайте (PDF). Можно отфильтровать по кабинету.</li>
                         <li><strong>Офлайн-режим</strong> – при отсутствии интернета все сканирования и изменения сохраняются в телефоне. После восстановления связи они автоматически синхронизируются.</li>
+                        <li><strong>Логи</strong> – на вкладке «Логи» можно просмотреть все отложенные операции, вручную запустить синхронизацию или создать устройство из нераспознанного штрих-кода.</li>
                         <li><strong>Тёмная тема</strong> – переключается иконкой луны/солнца в правом нижнем углу навигации.</li>
-                        <li><strong>Логи</strong> – на вкладке «Логи» можно просмотреть все отложенные операции и вручную запустить синхронизацию.</li>
                     </ol>
                 </div>
                 <div class="modal-footer">
