@@ -109,19 +109,19 @@
 }
 .loading-main-text {
     font-weight: 700;
-    color: #0d6efd; /* синий, как у Bootstrap primary – старый цвет */
+    color: #0d6efd;
     transition: color 0.5s ease;
 }
 .loading-sub-text {
     font-size: 0.9rem;
     transition: color 0.5s ease;
-    color: var(--blob-1); /* ярко-голубой */
+    color: var(--blob-1);
 }
 [data-theme="dark"] .loading-main-text {
-    color: var(--blob-1); /* ярко-зелёный */
+    color: var(--blob-1);
 }
 [data-theme="dark"] .loading-sub-text {
-    color: #00cc66; /* тёмно-зелёный */
+    color: #00cc66;
 }
 .custom-loader {
     width: 64px;
@@ -203,7 +203,7 @@ body {
     display: block;
 }
 
-/* ===== ХЕДЕР ДАШБОРДА (ОБНОВЛЁННЫЙ) ===== */
+/* ===== ХЕДЕР ДАШБОРДА ===== */
 .dashboard-header {
     display: flex;
     align-items: center;
@@ -242,7 +242,35 @@ body {
     font-size: 1.4rem;
 }
 #refreshDataBtn {
-    margin-left: auto; /* прижимаем к правому краю */
+    margin-left: auto;
+}
+
+/* ===== АДАПТИВ ДЛЯ ШИРОКИХ ЭКРАНОВ (компьютер) ===== */
+@media (min-width: 769px) {
+    .app-container {
+        max-width: 700px; /* увеличиваем контейнер для компьютера */
+    }
+    .dashboard-header {
+        gap: 1rem;
+    }
+    .header-badge {
+        flex: 0 0 auto; /* не растягивается */
+        max-width: 200px;
+        margin-right: auto; /* прижимаем кнопки вправо */
+    }
+    #changeNameBtn {
+        margin-left: auto; /* прижимаем обе кнопки вправо */
+    }
+    #refreshDataBtn {
+        margin-left: 0.5rem; /* небольшой отступ между кнопками */
+    }
+    .header-btn i {
+        font-size: 1.2rem; /* чуть меньше на десктопе */
+    }
+    .liquid-nav {
+        max-width: 700px;
+        width: calc(100% - 40px);
+    }
 }
 
 /* ===== СТАТИСТИКА ===== */
@@ -324,7 +352,7 @@ body {
     padding: 0.3rem 0.7rem;
 }
 
-/* ===== КАРТОЧКА УСТРОЙСТВА (С СЕРЫМ СТАТУСОМ) ===== */
+/* ===== КАРТОЧКА УСТРОЙСТВА ===== */
 .device-header {
     background: var(--device-header-bg);
     border-left: 6px solid #6c757d;
@@ -338,7 +366,6 @@ body {
     border: 2px solid white;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
-/* Цвета статусов */
 .status-green .status-dot { background: var(--color-green); }
 .status-yellow .status-dot { background: var(--color-yellow); }
 .status-red .status-dot { background: var(--color-red); }
@@ -349,7 +376,7 @@ body {
 .status-red { border-left-color: var(--color-red); }
 .status-grey { border-left-color: #adb5bd; }
 
-/* ===== НИЖНЯЯ НАВИГАЦИЯ (LIQUID NAV) ===== */
+/* ===== НИЖНЯЯ НАВИГАЦИЯ ===== */
 .liquid-nav {
     position: fixed;
     bottom: 16px;
@@ -603,7 +630,7 @@ body {
     }
 }
 
-/* ===== АЛЬБОМНАЯ ОРИЕНТАЦИЯ ТОЛЬКО ДЛЯ МОБИЛЬНЫХ ===== */
+/* ===== АЛЬБОМНАЯ ОРИЕНТАЦИЯ (мобильные) ===== */
 @media (max-width: 768px) and (orientation: landscape) {
     .app-container {
         max-width: 100%;
@@ -638,10 +665,4 @@ body {
     }
 }
 
-/* На широких экранах (компьютер) панель шире */
-@media (min-width: 769px) {
-    .liquid-nav {
-        max-width: 700px;
-        width: calc(100% - 40px);
-    }
-}
+/* ===== ШИРОКИЕ ЭКРАНЫ (компьютер) – уже добавлено выше ===== */
