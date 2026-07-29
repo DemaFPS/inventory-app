@@ -1,7 +1,6 @@
 /**
  * app.js – Полная версия с подтверждением сканирования, отдельным листом History,
- * автоопределением форматов штрих-кодов, пятью категориями статистики и цветовой индикацией.
- * В сканере увеличена область распознавания (qrbox) для лучшего захвата одномерных кодов.
+ * автоопределением форматов, увеличенной областью сканирования и экспериментальным детектором.
  */
 
 // ============================
@@ -37,7 +36,7 @@ let isInitializingScanner = false;
 let currentUser = null;
 let localUserName = localStorage.getItem('localUserName') || 'Аноним';
 let isCreating = false;
-let pendingScanText = ''; // для хранения распознанного текста до подтверждения
+let pendingScanText = '';
 
 // ============================
 // 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -69,13 +68,10 @@ function validateInventoryNumber(str) {
     return true;
 }
 
-// ===== УНИВЕРСАЛЬНАЯ ФУНКЦИЯ ПАРСИНГА ДАТ (ISO + ДД.ММ.ГГГГ) =====
 function parseDateFromString(dateStr) {
     if (!dateStr) return null;
     let date = new Date(dateStr);
-    if (!isNaN(date.getTime())) {
-        return date;
-    }
+    if (!isNaN(date.getTime())) return date;
     let clean = String(dateStr).replace(/[^0-9.]/g, '');
     if (!clean) return null;
     const parts = clean.split('.');
@@ -107,25 +103,12 @@ function showScreen(screenId) {
     document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
     const target = document.getElementById(screenId);
     if (target) target.classList.add('active');
-
     document.querySelectorAll('.nav-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.screen === screenId);
     });
-
-    if (screenId === 'scanner') {
-        initScanner();
-    } else {
-        stopScanner();
-    }
-
-    if (screenId === 'dashboard') {
-        updateDashboardStats();
-    }
-
-    if (screenId === 'logs') {
-        renderLogs();
-    }
-
+    if (screenId === 'scanner') { initScanner(); } else { stopScanner(); }
+    if (screenId === 'dashboard') updateDashboardStats();
+    if (screenId === 'logs') renderLogs();
     setTimeout(updateActivePill, 50);
 }
 
@@ -183,22 +166,12 @@ async function callProxy(action, payload = {}) {
             headers: { 'Content-Type': 'text/plain' },
             body: JSON.stringify({ action, payload })
         });
-        if (!response.ok) {
-            throw new Error(`Ошибка HTTP: ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`Ошибка HTTP: ${response.status}`);
         const text = await response.text();
         let data;
-        try {
-            data = JSON.parse(text);
-        } catch (e) {
-            throw new Error(`Сервер вернул невалидный JSON: ${text.substring(0, 50)}`);
-        }
-        if (!data || typeof data !== 'object') {
-            throw new Error('Пустой или невалидный ответ от сервера');
-        }
-        if (!data.success) {
-            throw new Error(data.error || data.message || 'Неизвестная ошибка');
-        }
+        try { data = JSON.parse(text); } catch (e) { throw new Error(`Сервер вернул невалидный JSON: ${text.substring(0, 50)}`); }
+        if (!data || typeof data !== 'object') throw new Error('Пустой или невалидный ответ от сервера');
+        if (!data.success) throw new Error(data.error || data.message || 'Неизвестная ошибка');
         return data;
     } catch (error) {
         console.error('Ошибка прокси:', error);
@@ -270,14 +243,12 @@ async function addDevice(deviceData) {
         showToast('Неверный инвентарный номер', 'danger');
         throw new Error('Invalid inventory number');
     }
-
     const normalized = normalizeInventoryNumber(inventoryNumber);
     const localExists = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
     if (localExists) {
         showToast('Устройство с таким номером уже существует (локально)', 'warning');
         throw new Error('Duplicate local');
     }
-
     if (navigator.onLine) {
         try {
             const result = await callProxy('read');
@@ -292,20 +263,16 @@ async function addDevice(deviceData) {
                 throw new Error('Duplicate server');
             }
         } catch (e) {
-            if (e.message && (e.message.includes('уже существует') || e.message.includes('Duplicate'))) {
-                throw e;
-            }
+            if (e.message && (e.message.includes('уже существует') || e.message.includes('Duplicate'))) throw e;
             console.warn('Ошибка проверки на сервере, продолжаем создание:', e);
         }
     }
-
     try {
         const result = await callProxy('add', {
             ...deviceData,
             initiator: getInitiatorName()
         });
         showToast(result.message || 'Устройство создано', 'success');
-
         const now = new Date().toLocaleString('ru-RU');
         const newDevice = {
             inventoryNumber: inventoryNumber,
@@ -321,7 +288,6 @@ async function addDevice(deviceData) {
         inventoryData.push(newDevice);
         localStorage.setItem('inventoryCache', JSON.stringify(inventoryData));
         updateDashboardStats();
-
         return result;
     } catch (error) {
         if (error.message && (error.message.includes('уже существует') || error.message.includes('Duplicate'))) {
@@ -336,7 +302,7 @@ async function addDevice(deviceData) {
 }
 
 // ============================
-// 5. ДАШБОРД – ПЯТЬ КАТЕГОРИЙ
+// 5. ДАШБОРД
 // ============================
 function updateDashboardStats() {
     const total = inventoryData.length;
@@ -368,7 +334,7 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 6. СКАНЕР – С УВЕЛИЧЕННОЙ ОБЛАСТЬЮ РАСПОЗНАВАНИЯ (qrbox) И БЕЗ ОГРАНИЧЕНИЙ ПО ФОРМАТАМ
+// 6. СКАНЕР (ОБНОВЛЁННЫЙ)
 // ============================
 async function initScanner() {
     if (isInitializingScanner) return;
@@ -388,14 +354,13 @@ async function initScanner() {
         readerElement.innerHTML = '';
         scannerInstance = new Html5Qrcode("reader");
 
-        // Определяем доступную ширину контейнера для адаптивного qrbox
         const containerWidth = readerElement.offsetWidth || 400;
-
         const config = {
-            fps: 10,
-            // === УВЕЛИЧЕННАЯ ОБЛАСТЬ СКАНИРОВАНИЯ (решение 1) ===
+            fps: 15,
             qrbox: { width: Math.min(containerWidth, 500), height: 350 },
-            // formatsToSupport удалён – сканер определяет форматы автоматически
+            experimentalFeatures: {
+                useBarCodeDetectorIfSupported: true
+            }
         };
 
         await scannerInstance.start(
@@ -406,7 +371,7 @@ async function initScanner() {
         );
         isScanning = true;
         isInitializingScanner = false;
-        console.log('Сканер запущен с увеличенной областью распознавания');
+        console.log('Сканер запущен с экспериментальным детектором');
     } catch (err) {
         console.error('Ошибка запуска сканера:', err);
         showToast('Не удалось получить доступ к камере: ' + err.message, 'danger');
@@ -437,7 +402,6 @@ async function onScanSuccess(decodedText, decodedResult) {
     let format = decodedResult?.result?.format || decodedResult?.format || '';
     console.log('Формат:', format);
 
-    // QR-ссылки обрабатываем сразу
     if (rawText.startsWith('http://') || rawText.startsWith('https://')) {
         console.log('QR-ссылка – диалог перехода');
         if (navigator.onLine) {
@@ -455,7 +419,6 @@ async function onScanSuccess(decodedText, decodedResult) {
         return;
     }
 
-    // Для штрих-кодов показываем диалог подтверждения
     pendingScanText = rawText;
     document.getElementById('confirmScanInput').value = rawText;
     const modal = new bootstrap.Modal(document.getElementById('confirmScanModal'));
@@ -464,9 +427,7 @@ async function onScanSuccess(decodedText, decodedResult) {
 
 function onScanError(err) { /* игнорируем */ }
 
-// ===== ОБРАБОТЧИКИ МОДАЛКИ ПОДТВЕРЖДЕНИЯ =====
 document.addEventListener('DOMContentLoaded', function() {
-    // Кнопка "Искать / Создать"
     document.getElementById('confirmScanOkBtn')?.addEventListener('click', function() {
         const input = document.getElementById('confirmScanInput');
         let value = input.value.trim();
@@ -478,14 +439,10 @@ document.addEventListener('DOMContentLoaded', function() {
         if (modal) modal.hide();
         processScannedBarcode(value);
     });
-
-    // Кнопка редактирования (фокус на поле)
     document.getElementById('confirmScanEditBtn')?.addEventListener('click', function() {
         document.getElementById('confirmScanInput').focus();
         document.getElementById('confirmScanInput').select();
     });
-
-    // Обработка Enter в поле ввода
     document.getElementById('confirmScanInput')?.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') {
             document.getElementById('confirmScanOkBtn').click();
@@ -493,7 +450,6 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 
-// ===== ФУНКЦИЯ ОБРАБОТКИ ПОДТВЕРЖДЁННОГО ШТРИХ-КОДА =====
 async function processScannedBarcode(rawText) {
     const normalized = normalizeInventoryNumber(rawText);
     console.log('Поиск устройства по номеру:', normalized);
@@ -541,7 +497,6 @@ async function processScannedBarcode(rawText) {
     }
 }
 
-// ===== ОБРАБОТКА РУЧНОГО ВВОДА (использует ту же логику) =====
 async function handleManualFind() {
     const input = document.getElementById('manualInvInput');
     if (!input) return;
@@ -558,7 +513,7 @@ async function handleManualFind() {
 }
 
 // ============================
-// 7. КАРТОЧКА УСТРОЙСТВА + ЗАГРУЗКА ИСТОРИИ ИЗ ОТДЕЛЬНОГО ЛИСТА
+// 7. КАРТОЧКА УСТРОЙСТВА
 // ============================
 async function loadDeviceHistory(inventoryNumber) {
     try {
@@ -589,7 +544,6 @@ async function renderDeviceCard(device) {
     setText('deviceLastModified', device.lastModified || '—');
     setText('deviceInitiator', device.initiator || '—');
 
-    // === ЗАГРУЗКА ИСТОРИИ ИЗ НОВОГО ЛИСТА ===
     const historyContainer = document.getElementById('deviceHistory');
     if (historyContainer) {
         historyContainer.innerHTML = '<div class="text-muted small">Загрузка истории...</div>';
@@ -603,7 +557,6 @@ async function renderDeviceCard(device) {
         }
     }
 
-    // Цвет статуса
     const header = document.getElementById('deviceStatusIndicator');
     if (header) {
         const colorClass = getStatusColorClass(device);
@@ -615,7 +568,7 @@ async function renderDeviceCard(device) {
 }
 
 // ============================
-// 8. ОБРАБОТЧИКИ ДЕЙСТВИЙ (с передачей actionDescription и comment)
+// 8. ОБРАБОТЧИКИ ДЕЙСТВИЙ
 // ============================
 async function performDeviceAction(action, data = {}) {
     if (!currentDevice) {
@@ -697,12 +650,10 @@ async function performDeviceAction(action, data = {}) {
             return;
     }
 
-    // Сохраняем в старое поле истории (для совместимости)
     if (history) history += '; ';
     history += newHistoryEntry;
     updates.history = history;
 
-    // Передаём дополнительные поля для записи в отдельный лист History
     updates.actionDescription = actionDescription;
     updates.comment = comment;
     updates.initiator = initiator;
@@ -747,9 +698,7 @@ async function loadCabinetSelect() {
     const select = document.getElementById('cabinetSelect');
     if (!select) return;
     select.innerHTML = '<option value="">— Выберите кабинет —</option>';
-    if (cabinetsData.length === 0) {
-        await loadInventory();
-    }
+    if (cabinetsData.length === 0) await loadInventory();
     cabinetsData.forEach(cab => {
         if (!cab || !cab.cabinet) return;
         const opt = document.createElement('option');
@@ -824,9 +773,7 @@ function savePendingScan(inventoryNumber, type = 'barcode') {
         });
         localStorage.setItem('pendingScans', JSON.stringify(pending));
     }
-    if (document.getElementById('logs').classList.contains('active')) {
-        renderLogs();
-    }
+    if (document.getElementById('logs').classList.contains('active')) renderLogs();
 }
 
 function savePendingAction(inventoryNumber, updates) {
@@ -840,9 +787,7 @@ function savePendingAction(inventoryNumber, updates) {
     } else {
         showToast('Действие уже есть в очереди', 'info');
     }
-    if (document.getElementById('logs').classList.contains('active')) {
-        renderLogs();
-    }
+    if (document.getElementById('logs').classList.contains('active')) renderLogs();
 }
 
 async function syncPendingData() {
@@ -1190,7 +1135,7 @@ function printReport() {
 }
 
 // ============================
-// 14. НАВИГАЦИЯ (PILL)
+// 14. НАВИГАЦИЯ
 // ============================
 let navButtons = [];
 let activePill = null;
@@ -1368,7 +1313,6 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         });
 
-        // Карточка
         document.getElementById('editBtn')?.addEventListener('click', function() {
             if (!currentDevice) {
                 showToast('Устройство не выбрано', 'warning');
