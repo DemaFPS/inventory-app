@@ -1,6 +1,6 @@
 /**
  * app.js – Оптимизированная версия с универсальным парсингом дат,
- * расширенными форматами штрих-кодов и поддержкой отдельного листа History.
+ * поддержкой отдельного листа History и автоматическим определением форматов штрих-кодов.
  * Версия с пятью категориями на главном экране и цветовой индикацией статусов.
  */
 
@@ -23,7 +23,7 @@ const auth = firebase.auth();
 // ============================
 // 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwclBY36gERG05XSeznY7zy96PANgyYra9BTcQRbMebhZROg0nfavcjdI4u5brD1FE9/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwBbkVP-gFgGnBeETXRPhQIkm25Iaj3j_lFEqjc6yFDe308TuFP-bw_6Un40D_N9wuH/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -367,7 +367,7 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 6. СКАНЕР – С РАСШИРЕННЫМИ ФОРМАТАМИ
+// 6. СКАНЕР – БЕЗ ОГРАНИЧЕНИЙ ПО ФОРМАТАМ
 // ============================
 async function initScanner() {
     if (isInitializingScanner) return;
@@ -388,18 +388,8 @@ async function initScanner() {
         scannerInstance = new Html5Qrcode("reader");
         const config = {
             fps: 10,
-            qrbox: { width: 250, height: 250 },
-            // ===== РАСШИРЕННЫЕ ФОРМАТЫ =====
-            formatsToSupport: [
-                Html5QrcodeSupportedFormats.QR_CODE,
-                Html5QrcodeSupportedFormats.EAN_13,
-                Html5QrcodeSupportedFormats.CODE_128,
-                Html5QrcodeSupportedFormats.CODE_39,
-                Html5QrcodeSupportedFormats.CODABAR,
-                Html5QrcodeSupportedFormats.UPC_A,
-                Html5QrcodeSupportedFormats.UPC_E,
-                Html5QrcodeSupportedFormats.EAN_8
-            ]
+            qrbox: { width: 250, height: 250 }
+            // formatsToSupport удалён – сканер будет пытаться распознать любые форматы
         };
         await scannerInstance.start(
             { facingMode: "environment" },
@@ -409,7 +399,7 @@ async function initScanner() {
         );
         isScanning = true;
         isInitializingScanner = false;
-        console.log('Сканер запущен с расширенными форматами');
+        console.log('Сканер запущен (автоопределение форматов)');
     } catch (err) {
         console.error('Ошибка запуска сканера:', err);
         showToast('Не удалось получить доступ к камере: ' + err.message, 'danger');
@@ -465,7 +455,7 @@ async function onScanSuccess(decodedText, decodedResult) {
         console.log('Найдено локально:', device);
         currentDevice = device;
         showScreen('deviceCard');
-        await renderDeviceCard(device);   // await
+        await renderDeviceCard(device);
         return;
     }
 
