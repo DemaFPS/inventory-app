@@ -1,6 +1,6 @@
 /**
- * app.js – финальная версия с QuaggaJS для распознавания одномерных штрих-кодов (включая Code 128B)
- * Все остальные функции (прокси, карточки, история, офлайн) сохранены.
+ * app.js – Полная версия с подтверждением сканирования, отдельным листом History,
+ * автоопределением форматов, увеличенной областью сканирования и экспериментальным детектором.
  */
 
 // ============================
@@ -30,13 +30,13 @@ const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwBbkVP-gFgGnBeETXRPh
 let inventoryData = [];
 let cabinetsData = [];
 let currentDevice = null;
+let scannerInstance = null;
 let isScanning = false;
 let isInitializingScanner = false;
 let currentUser = null;
 let localUserName = localStorage.getItem('localUserName') || 'Аноним';
 let isCreating = false;
 let pendingScanText = '';
-let quaggaRunning = false;
 
 // ============================
 // 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -103,25 +103,12 @@ function showScreen(screenId) {
     document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
     const target = document.getElementById(screenId);
     if (target) target.classList.add('active');
-
     document.querySelectorAll('.nav-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.screen === screenId);
     });
-
-    if (screenId === 'scanner') {
-        initScanner();
-    } else {
-        stopScanner();
-    }
-
-    if (screenId === 'dashboard') {
-        updateDashboardStats();
-    }
-
-    if (screenId === 'logs') {
-        renderLogs();
-    }
-
+    if (screenId === 'scanner') { initScanner(); } else { stopScanner(); }
+    if (screenId === 'dashboard') updateDashboardStats();
+    if (screenId === 'logs') renderLogs();
     setTimeout(updateActivePill, 50);
 }
 
@@ -256,14 +243,12 @@ async function addDevice(deviceData) {
         showToast('Неверный инвентарный номер', 'danger');
         throw new Error('Invalid inventory number');
     }
-
     const normalized = normalizeInventoryNumber(inventoryNumber);
     const localExists = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
     if (localExists) {
         showToast('Устройство с таким номером уже существует (локально)', 'warning');
         throw new Error('Duplicate local');
     }
-
     if (navigator.onLine) {
         try {
             const result = await callProxy('read');
@@ -282,14 +267,12 @@ async function addDevice(deviceData) {
             console.warn('Ошибка проверки на сервере, продолжаем создание:', e);
         }
     }
-
     try {
         const result = await callProxy('add', {
             ...deviceData,
             initiator: getInitiatorName()
         });
         showToast(result.message || 'Устройство создано', 'success');
-
         const now = new Date().toLocaleString('ru-RU');
         const newDevice = {
             inventoryNumber: inventoryNumber,
@@ -305,7 +288,6 @@ async function addDevice(deviceData) {
         inventoryData.push(newDevice);
         localStorage.setItem('inventoryCache', JSON.stringify(inventoryData));
         updateDashboardStats();
-
         return result;
     } catch (error) {
         if (error.message && (error.message.includes('уже существует') || error.message.includes('Duplicate'))) {
@@ -352,123 +334,74 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 6. СКАНЕР (QuaggaJS)
+// 6. СКАНЕР (ОБНОВЛЁННЫЙ)
 // ============================
 async function initScanner() {
     if (isInitializingScanner) return;
-    if (quaggaRunning) return;
+    if (scannerInstance && isScanning) return;
 
     isInitializingScanner = true;
     try {
-        if (typeof Quagga === 'undefined') {
-            throw new Error('Библиотека Quagga не загружена. Проверьте подключение.');
+        if (typeof Html5Qrcode === 'undefined') {
+            throw new Error('Библиотека html5-qrcode не загружена.');
         }
+        const readerElement = document.getElementById('reader');
+        if (!readerElement) throw new Error('Элемент #reader не найден');
+        if (scannerInstance) {
+            try { await scannerInstance.stop(); await scannerInstance.clear(); } catch(e) {}
+            scannerInstance = null;
+        }
+        readerElement.innerHTML = '';
+        scannerInstance = new Html5Qrcode("reader");
 
-        const container = document.getElementById('interactive');
-        if (!container) throw new Error('Элемент #interactive не найден');
-
-        // Очищаем контейнер перед инициализацией
-        container.innerHTML = '';
-
-        // Настройка Quagga
-        Quagga.init({
-            inputStream: {
-                name: "Live",
-                type: "LiveStream",
-                target: container,
-                constraints: {
-                    facingMode: "environment",
-                    width: { ideal: 640 },
-                    height: { ideal: 480 }
-                }
-            },
-            decoder: {
-                readers: [
-                    "code_128_reader",
-                    "ean_reader",
-                    "ean_8_reader",
-                    "code_39_reader",
-                    "codabar_reader",
-                    "upc_reader",
-                    "upc_e_reader"
-                ],
-                debug: {
-                    showPattern: false,
-                    drawBoundingBox: false,
-                    showFrequency: false,
-                    drawScanline: false,
-                    showCanvas: false
-                }
-            },
-            locate: true
-        }, function(err) {
-            if (err) {
-                console.error('Ошибка инициализации Quagga:', err);
-                showToast('Ошибка инициализации сканера: ' + err.message, 'danger');
-                document.querySelector('.manual-input').style.display = 'block';
-                isInitializingScanner = false;
-                return;
+        const containerWidth = readerElement.offsetWidth || 400;
+        const config = {
+            fps: 15,
+            qrbox: { width: Math.min(containerWidth, 500), height: 350 },
+            experimentalFeatures: {
+                useBarCodeDetectorIfSupported: true
             }
-            Quagga.start();
-            quaggaRunning = true;
-            isScanning = true;
-            isInitializingScanner = false;
-            console.log('Quagga сканер запущен');
+        };
 
-            // Обработчик обнаружения
-            Quagga.onDetected(function(result) {
-                if (result && result.codeResult && result.codeResult.code) {
-                    const code = result.codeResult.code;
-                    console.log('Quagga распознал:', code);
-                    // Останавливаем сканер после первого успешного распознавания
-                    stopScanner();
-                    onScanSuccess(code);
-                }
-            });
-        });
-
+        await scannerInstance.start(
+            { facingMode: "environment" },
+            config,
+            onScanSuccess,
+            onScanError
+        );
+        isScanning = true;
+        isInitializingScanner = false;
+        console.log('Сканер запущен с экспериментальным детектором');
     } catch (err) {
-        console.error('Ошибка запуска сканера Quagga:', err);
-        showToast('Не удалось запустить сканер: ' + err.message, 'danger');
+        console.error('Ошибка запуска сканера:', err);
+        showToast('Не удалось получить доступ к камере: ' + err.message, 'danger');
         document.querySelector('.manual-input').style.display = 'block';
         isInitializingScanner = false;
     }
 }
 
 function stopScanner() {
-    if (quaggaRunning) {
+    if (scannerInstance && isScanning) {
         try {
-            Quagga.stop();
-            quaggaRunning = false;
-            isScanning = false;
-            console.log('Quagga сканер остановлен');
-        } catch (e) {
-            console.warn('Ошибка при остановке Quagga:', e);
-        }
-    }
-    // Очищаем контейнер
-    const container = document.getElementById('interactive');
-    if (container) {
-        container.innerHTML = '';
+            scannerInstance.stop().then(() => { isScanning = false; }).catch(err => console.warn('Остановка сканера:', err));
+        } catch (e) { console.warn('Ошибка при остановке сканера', e); }
     }
 }
 
-// ============================
-// 7. ОБРАБОТКА РЕЗУЛЬТАТА СКАНИРОВАНИЯ
-// ============================
-async function onScanSuccess(decodedText) {
+async function onScanSuccess(decodedText, decodedResult) {
     if (!decodedText) {
         console.warn('Пустой результат сканирования');
         return;
     }
-    console.log('Распознано (Quagga):', decodedText);
+    console.log('Распознано:', decodedText);
     vibrate(100);
     playBeep(true);
     stopScanner();
 
     const rawText = decodedText.trim();
+    let format = decodedResult?.result?.format || decodedResult?.format || '';
+    console.log('Формат:', format);
 
-    // QR-ссылки обрабатываем сразу
     if (rawText.startsWith('http://') || rawText.startsWith('https://')) {
         console.log('QR-ссылка – диалог перехода');
         if (navigator.onLine) {
@@ -486,14 +419,14 @@ async function onScanSuccess(decodedText) {
         return;
     }
 
-    // Для штрих-кодов показываем диалог подтверждения
     pendingScanText = rawText;
     document.getElementById('confirmScanInput').value = rawText;
     const modal = new bootstrap.Modal(document.getElementById('confirmScanModal'));
     modal.show();
 }
 
-// Обработчики модалки подтверждения
+function onScanError(err) { /* игнорируем */ }
+
 document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('confirmScanOkBtn')?.addEventListener('click', function() {
         const input = document.getElementById('confirmScanInput');
@@ -517,7 +450,6 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 
-// ===== ФУНКЦИЯ ОБРАБОТКИ ПОДТВЕРЖДЁННОГО ШТРИХ-КОДА =====
 async function processScannedBarcode(rawText) {
     const normalized = normalizeInventoryNumber(rawText);
     console.log('Поиск устройства по номеру:', normalized);
@@ -565,7 +497,6 @@ async function processScannedBarcode(rawText) {
     }
 }
 
-// ===== ОБРАБОТКА РУЧНОГО ВВОДА =====
 async function handleManualFind() {
     const input = document.getElementById('manualInvInput');
     if (!input) return;
@@ -582,7 +513,7 @@ async function handleManualFind() {
 }
 
 // ============================
-// 8. КАРТОЧКА УСТРОЙСТВА + ИСТОРИЯ
+// 7. КАРТОЧКА УСТРОЙСТВА
 // ============================
 async function loadDeviceHistory(inventoryNumber) {
     try {
@@ -637,7 +568,7 @@ async function renderDeviceCard(device) {
 }
 
 // ============================
-// 9. ОБРАБОТЧИКИ ДЕЙСТВИЙ
+// 8. ОБРАБОТЧИКИ ДЕЙСТВИЙ
 // ============================
 async function performDeviceAction(action, data = {}) {
     if (!currentDevice) {
@@ -761,7 +692,7 @@ function removePendingAction(inventoryNumber) {
 }
 
 // ============================
-// 10. ОБОРОТНАЯ ВЕДОМОСТЬ
+// 9. ОБОРОТНАЯ ВЕДОМОСТЬ
 // ============================
 async function loadCabinetSelect() {
     const select = document.getElementById('cabinetSelect');
@@ -827,7 +758,7 @@ function renderChecklist(cabinetName) {
 }
 
 // ============================
-// 11. ОФЛАЙН-РЕЖИМ
+// 10. ОФЛАЙН-РЕЖИМ
 // ============================
 function savePendingScan(inventoryNumber, type = 'barcode') {
     let pending = JSON.parse(localStorage.getItem('pendingScans') || '[]');
@@ -942,7 +873,7 @@ async function syncPendingData() {
 }
 
 // ============================
-// 12. ЛОГИ
+// 11. ЛОГИ
 // ============================
 function renderLogs() {
     const container = document.getElementById('logsList');
@@ -1015,7 +946,7 @@ window.createFromLog = function(inventoryNumber) {
 };
 
 // ============================
-// 13. МОДАЛКА СОЗДАНИЯ
+// 12. МОДАЛКА СОЗДАНИЯ
 // ============================
 function showCreateDeviceModal(inventoryNumber) {
     document.getElementById('createInventoryNumber').value = inventoryNumber;
@@ -1118,7 +1049,7 @@ async function confirmCreateDevice() {
 }
 
 // ============================
-// 14. ОТЧЁТ
+// 13. ОТЧЁТ
 // ============================
 function generateCSV(data) {
     if (!data || !Array.isArray(data) || data.length === 0) return '';
@@ -1204,7 +1135,7 @@ function printReport() {
 }
 
 // ============================
-// 15. НАВИГАЦИЯ (PILL)
+// 14. НАВИГАЦИЯ
 // ============================
 let navButtons = [];
 let activePill = null;
@@ -1223,7 +1154,7 @@ function updateActivePill(smooth = true) {
 }
 
 // ============================
-// 16. ИНИЦИАЛИЗАЦИЯ
+// 15. ИНИЦИАЛИЗАЦИЯ
 // ============================
 document.addEventListener('DOMContentLoaded', async function() {
     const forceHideLoading = setTimeout(() => {
@@ -1382,7 +1313,6 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         });
 
-        // Карточка
         document.getElementById('editBtn')?.addEventListener('click', function() {
             if (!currentDevice) {
                 showToast('Устройство не выбрано', 'warning');

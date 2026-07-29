@@ -15,6 +15,7 @@
             }
         })();
     </script>
+
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <link rel="stylesheet" href="styles.css">
@@ -48,37 +49,75 @@
                 <div class="dashboard-header">
                     <h4>Инвентаризация</h4>
                     <span id="userDisplay" class="badge bg-primary header-badge">Аноним</span>
-                    <button id="changeNameBtn" class="btn btn-outline-secondary btn-sm header-btn" title="Сменить имя"><i class="bi bi-person"></i></button>
-                    <button id="refreshDataBtn" class="btn btn-outline-secondary btn-sm header-btn" title="Обновить данные"><i class="bi bi-arrow-clockwise"></i></button>
+                    <button id="changeNameBtn" class="btn btn-outline-secondary btn-sm header-btn" title="Сменить имя">
+                        <i class="bi bi-person"></i>
+                    </button>
+                    <button id="refreshDataBtn" class="btn btn-outline-secondary btn-sm header-btn" title="Обновить данные">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
                 </div>
 
                 <!-- Пять карточек статистики -->
                 <div class="row g-2 mb-4">
-                    <div class="col-6 col-md-2"><div class="stat-card p-2 text-center bg-light rounded"><div class="stat-number text-primary" id="totalCount">0</div><div class="stat-label">Всего</div></div></div>
-                    <div class="col-6 col-md-2"><div class="stat-card p-2 text-center bg-light rounded"><div class="stat-number text-success" id="inUseCount">0</div><div class="stat-label">В эксплуатации</div></div></div>
-                    <div class="col-6 col-md-2"><div class="stat-card p-2 text-center bg-light rounded"><div class="stat-number text-warning" id="expiringCount">0</div><div class="stat-label">Гарантия истекла, истекает</div></div></div>
-                    <div class="col-6 col-md-2 repair-col"><div class="stat-card p-2 text-center bg-light rounded"><div class="stat-number text-danger" id="repairCount">0</div><div class="stat-label">В ремонте</div></div></div>
-                    <div class="col-6 col-md-2 offset-3 offset-md-0"><div class="stat-card p-2 text-center bg-light rounded"><div class="stat-number text-secondary" id="inactiveCount">0</div><div class="stat-label">Списан / На складе</div></div></div>
+                    <div class="col-6 col-md-2">
+                        <div class="stat-card p-2 text-center bg-light rounded">
+                            <div class="stat-number text-primary" id="totalCount">0</div>
+                            <div class="stat-label">Всего</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-2">
+                        <div class="stat-card p-2 text-center bg-light rounded">
+                            <div class="stat-number text-success" id="inUseCount">0</div>
+                            <div class="stat-label">В эксплуатации</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-2">
+                        <div class="stat-card p-2 text-center bg-light rounded">
+                            <div class="stat-number text-warning" id="expiringCount">0</div>
+                            <div class="stat-label">Гарантия истекла, истекает</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-2 repair-col">
+                        <div class="stat-card p-2 text-center bg-light rounded">
+                            <div class="stat-number text-danger" id="repairCount">0</div>
+                            <div class="stat-label">В ремонте</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-2 offset-3 offset-md-0">
+                        <div class="stat-card p-2 text-center bg-light rounded">
+                            <div class="stat-number text-secondary" id="inactiveCount">0</div>
+                            <div class="stat-label">Списан / На складе</div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Кнопки действий -->
                 <div class="d-grid gap-3">
-                    <button id="scanBtn" class="btn btn-primary btn-lg py-3 scan-btn"><i class="bi bi-qr-code-scan"></i> Сканировать</button>
-                    <button id="checklistBtn" class="btn btn-outline-secondary"><i class="bi bi-clipboard-check"></i> Оборотная ведомость</button>
-                    <button id="reportBtn" class="btn btn-outline-secondary"><i class="bi bi-file-earmark-text"></i> Выгрузить отчет</button>
-                    <button id="helpBtn" class="btn btn-outline-info btn-sm"><i class="bi bi-question-circle"></i> Помощь</button>
+                    <button id="scanBtn" class="btn btn-primary btn-lg py-3 scan-btn">
+                        <i class="bi bi-qr-code-scan"></i> Сканировать
+                    </button>
+                    <button id="checklistBtn" class="btn btn-outline-secondary">
+                        <i class="bi bi-clipboard-check"></i> Оборотная ведомость
+                    </button>
+                    <button id="reportBtn" class="btn btn-outline-secondary">
+                        <i class="bi bi-file-earmark-text"></i> Выгрузить отчет
+                    </button>
+                    <button id="helpBtn" class="btn btn-outline-info btn-sm">
+                        <i class="bi bi-question-circle"></i> Помощь
+                    </button>
                 </div>
             </div>
         </div>
 
-        <!-- ЭКРАН 2: СКАНЕР (Quagga) -->
+        <!-- ЭКРАН 2: СКАНЕР -->
         <div id="scanner" class="screen">
             <div class="scanner-container">
                 <div class="scanner-header p-2">
-                    <button id="backFromScanner" class="btn btn-outline-light btn-sm"><i class="bi bi-arrow-left"></i> Назад</button>
+                    <button id="backFromScanner" class="btn btn-outline-light btn-sm">
+                        <i class="bi bi-arrow-left"></i> Назад
+                    </button>
                 </div>
-                <!-- Контейнер для Quagga -->
-                <div id="interactive" style="width:100%; min-height:60vh; position:relative; background:#000;"></div>
+                <div id="reader" style="width:100%;"></div>
                 <div class="manual-input p-3 bg-white">
                     <div class="input-group">
                         <input type="text" id="manualInvInput" class="form-control" placeholder="Введите инв. номер">
@@ -93,21 +132,28 @@
         <div id="deviceCard" class="screen">
             <div class="container-fluid p-3">
                 <div class="d-flex align-items-center mb-3">
-                    <button id="backFromDevice" class="btn btn-outline-secondary btn-sm me-2"><i class="bi bi-arrow-left"></i></button>
+                    <button id="backFromDevice" class="btn btn-outline-secondary btn-sm me-2">
+                        <i class="bi bi-arrow-left"></i>
+                    </button>
                     <h5 class="mb-0">Карточка устройства</h5>
                 </div>
                 <div class="device-header d-flex align-items-center p-3 rounded mb-3" id="deviceStatusIndicator">
                     <div class="status-dot me-3" id="statusDot"></div>
-                    <div><div class="fw-bold" id="deviceInventory">Инв. №</div><div class="text-muted small" id="deviceModel">Модель</div></div>
+                    <div>
+                        <div class="fw-bold" id="deviceInventory">Инв. №</div>
+                        <div class="text-muted small" id="deviceModel">Модель</div>
+                    </div>
                 </div>
-                <div class="card mb-3"><div class="card-body">
-                    <div class="row mb-2"><div class="col-5 fw-bold">Серийный номер:</div><div class="col-7" id="deviceSerial">—</div></div>
-                    <div class="row mb-2"><div class="col-5 fw-bold">Статус:</div><div class="col-7" id="deviceStatus">—</div></div>
-                    <div class="row mb-2"><div class="col-5 fw-bold">Ответственное лицо:</div><div class="col-7" id="deviceResponsible">—</div></div>
-                    <div class="row mb-2"><div class="col-5 fw-bold">Окончание гарантии:</div><div class="col-7" id="deviceWarranty">—</div></div>
-                    <div class="row mb-2"><div class="col-5 fw-bold">Последнее изменение:</div><div class="col-7" id="deviceLastModified">—</div></div>
-                    <div class="row"><div class="col-5 fw-bold">Инициатор:</div><div class="col-7" id="deviceInitiator">—</div></div>
-                </div></div>
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="row mb-2"><div class="col-5 fw-bold">Серийный номер:</div><div class="col-7" id="deviceSerial">—</div></div>
+                        <div class="row mb-2"><div class="col-5 fw-bold">Статус:</div><div class="col-7" id="deviceStatus">—</div></div>
+                        <div class="row mb-2"><div class="col-5 fw-bold">Ответственное лицо:</div><div class="col-7" id="deviceResponsible">—</div></div>
+                        <div class="row mb-2"><div class="col-5 fw-bold">Окончание гарантии:</div><div class="col-7" id="deviceWarranty">—</div></div>
+                        <div class="row mb-2"><div class="col-5 fw-bold">Последнее изменение:</div><div class="col-7" id="deviceLastModified">—</div></div>
+                        <div class="row"><div class="col-5 fw-bold">Инициатор:</div><div class="col-7" id="deviceInitiator">—</div></div>
+                    </div>
+                </div>
                 <div class="card mb-3">
                     <div class="card-header bg-light">История перемещений</div>
                     <div class="card-body" id="deviceHistory" style="max-height:150px; overflow-y:auto;">
@@ -128,20 +174,29 @@
         <div id="checklist" class="screen">
             <div class="container-fluid p-3">
                 <div class="d-flex align-items-center mb-3">
-                    <button id="backFromChecklist" class="btn btn-outline-secondary btn-sm me-2"><i class="bi bi-arrow-left"></i></button>
+                    <button id="backFromChecklist" class="btn btn-outline-secondary btn-sm me-2">
+                        <i class="bi bi-arrow-left"></i>
+                    </button>
                     <h5 class="mb-0">Оборотная ведомость</h5>
                 </div>
                 <div class="mb-3">
                     <label for="cabinetSelect" class="form-label">Выберите кабинет</label>
-                    <select id="cabinetSelect" class="form-select"><option value="">— Загрузка —</option></select>
+                    <select id="cabinetSelect" class="form-select">
+                        <option value="">— Загрузка —</option>
+                    </select>
                 </div>
                 <div class="mb-3">
-                    <div class="d-flex justify-content-between"><span>Прогресс: <span id="progressText">0 из 0</span></span>
+                    <div class="d-flex justify-content-between">
+                        <span>Прогресс: <span id="progressText">0 из 0</span></span>
                         <button id="refreshChecklistBtn" class="btn btn-sm btn-outline-secondary">Обновить</button>
                     </div>
-                    <div class="progress" style="height:20px;"><div id="progressBar" class="progress-bar" role="progressbar" style="width:0%;">0%</div></div>
+                    <div class="progress" style="height:20px;">
+                        <div id="progressBar" class="progress-bar" role="progressbar" style="width:0%;">0%</div>
+                    </div>
                 </div>
-                <div id="checklistItems" class="list-group"><div class="text-muted">Выберите кабинет</div></div>
+                <div id="checklistItems" class="list-group">
+                    <div class="text-muted">Выберите кабинет</div>
+                </div>
             </div>
         </div>
 
@@ -149,16 +204,24 @@
         <div id="report" class="screen">
             <div class="container-fluid p-3">
                 <div class="d-flex align-items-center mb-3">
-                    <button id="backFromReport" class="btn btn-outline-secondary btn-sm me-2"><i class="bi bi-arrow-left"></i></button>
+                    <button id="backFromReport" class="btn btn-outline-secondary btn-sm me-2">
+                        <i class="bi bi-arrow-left"></i>
+                    </button>
                     <h5 class="mb-0">Отчёт</h5>
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Фильтр по кабинету</label>
-                    <select id="reportCabinetFilter" class="form-select"><option value="">Все кабинеты</option></select>
+                    <select id="reportCabinetFilter" class="form-select">
+                        <option value="">Все кабинеты</option>
+                    </select>
                 </div>
                 <div class="d-grid gap-3">
-                    <button id="downloadCsvBtn" class="btn btn-primary btn-lg"><i class="bi bi-filetype-csv"></i> Скачать CSV</button>
-                    <button id="printPdfBtn" class="btn btn-secondary btn-lg"><i class="bi bi-printer"></i> Распечатать PDF</button>
+                    <button id="downloadCsvBtn" class="btn btn-primary btn-lg">
+                        <i class="bi bi-filetype-csv"></i> Скачать CSV
+                    </button>
+                    <button id="printPdfBtn" class="btn btn-secondary btn-lg">
+                        <i class="bi bi-printer"></i> Распечатать PDF
+                    </button>
                 </div>
             </div>
         </div>
@@ -167,40 +230,64 @@
         <div id="logs" class="screen">
             <div class="container-fluid p-3">
                 <div class="d-flex align-items-center mb-3">
-                    <button id="backFromLogs" class="btn btn-outline-secondary btn-sm me-2"><i class="bi bi-arrow-left"></i></button>
+                    <button id="backFromLogs" class="btn btn-outline-secondary btn-sm me-2">
+                        <i class="bi bi-arrow-left"></i>
+                    </button>
                     <h5 class="mb-0">Журнал офлайн-операций</h5>
                 </div>
                 <div class="mb-3">
                     <span class="badge bg-info" id="pendingScansCount">Сканирований: 0</span>
                     <span class="badge bg-warning ms-2" id="pendingActionsCount">Действий: 0</span>
                 </div>
-                <div id="logsList" class="list-group mb-3" style="max-height:400px; overflow-y:auto;"><div class="text-muted">Нет отложенных операций</div></div>
+                <div id="logsList" class="list-group mb-3" style="max-height: 400px; overflow-y: auto;">
+                    <div class="text-muted">Нет отложенных операций</div>
+                </div>
                 <div class="d-grid gap-2">
-                    <button id="syncNowBtn" class="btn btn-success"><i class="bi bi-cloud-upload"></i> Синхронизировать сейчас</button>
-                    <button id="clearLogsBtn" class="btn btn-outline-danger btn-sm"><i class="bi bi-trash"></i> Очистить логи (без синхронизации)</button>
+                    <button id="syncNowBtn" class="btn btn-success">
+                        <i class="bi bi-cloud-upload"></i> Синхронизировать сейчас
+                    </button>
+                    <button id="clearLogsBtn" class="btn btn-outline-danger btn-sm">
+                        <i class="bi bi-trash"></i> Очистить логи (без синхронизации)
+                    </button>
                 </div>
             </div>
         </div>
 
         <!-- НИЖНЯЯ НАВИГАЦИЯ -->
         <nav class="liquid-nav" id="bottomNav">
-            <div class="liquid-glare-container"><div class="liquid-glare" id="glare"></div></div>
+            <div class="liquid-glare-container">
+                <div class="liquid-glare" id="glare"></div>
+            </div>
             <div class="nav-items">
                 <div class="active-pill" id="active-pill"></div>
-                <button class="nav-btn active" data-screen="dashboard"><div class="btn-content"><i class="bi bi-house-door"></i><span>Главная</span></div></button>
-                <button class="nav-btn" data-screen="scanner"><div class="btn-content"><i class="bi bi-qr-code"></i><span>Сканер</span></div></button>
-                <button class="nav-btn" data-screen="checklist"><div class="btn-content"><i class="bi bi-clipboard-check"></i><span>Ведомость</span></div></button>
-                <button class="nav-btn" data-screen="report"><div class="btn-content"><i class="bi bi-file-earmark-text"></i><span>Отчёт</span></div></button>
-                <button class="nav-btn" data-screen="logs"><div class="btn-content"><i class="bi bi-clock-history"></i><span>Логи</span></div></button>
+                <button class="nav-btn active" data-screen="dashboard">
+                    <div class="btn-content"><i class="bi bi-house-door"></i><span>Главная</span></div>
+                </button>
+                <button class="nav-btn" data-screen="scanner">
+                    <div class="btn-content"><i class="bi bi-qr-code"></i><span>Сканер</span></div>
+                </button>
+                <button class="nav-btn" data-screen="checklist">
+                    <div class="btn-content"><i class="bi bi-clipboard-check"></i><span>Ведомость</span></div>
+                </button>
+                <button class="nav-btn" data-screen="report">
+                    <div class="btn-content"><i class="bi bi-file-earmark-text"></i><span>Отчёт</span></div>
+                </button>
+                <button class="nav-btn" data-screen="logs">
+                    <div class="btn-content"><i class="bi bi-clock-history"></i><span>Логи</span></div>
+                </button>
             </div>
             <div class="divider"></div>
             <button class="theme-btn" id="themeToggle" aria-label="Переключить тему">
                 <div class="theme-icon-wrapper">
                     <svg class="sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line>
-                        <line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line>
-                        <line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                        <circle cx="12" cy="12" r="5"></circle>
+                        <line x1="12" y1="1" x2="12" y2="3"></line>
+                        <line x1="12" y1="21" x2="12" y2="23"></line>
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                        <line x1="1" y1="12" x2="3" y2="12"></line>
+                        <line x1="21" y1="12" x2="23" y2="12"></line>
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
                         <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
                     </svg>
                     <svg class="moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
@@ -222,7 +309,10 @@
                     <div class="mb-3"><label for="transferFio" class="form-label">ФИО сотрудника *</label><input type="text" id="transferFio" class="form-control" placeholder="Иванов И.И." required></div>
                     <div class="mb-3"><label for="transferComment" class="form-label">Комментарий *</label><textarea id="transferComment" class="form-control" rows="2" placeholder="Причина передачи" required></textarea></div>
                 </div>
-                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button><button type="button" id="confirmTransfer" class="btn btn-success">Подтвердить</button></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="button" id="confirmTransfer" class="btn btn-success">Подтвердить</button>
+                </div>
             </div>
         </div>
     </div>
@@ -236,7 +326,10 @@
                     <p>Вы действительно хотите списать устройство <strong id="scrapInventory"></strong>?</p>
                     <div class="mb-3"><label for="scrapComment" class="form-label">Причина списания</label><input type="text" id="scrapComment" class="form-control" placeholder="Неисправность, утилизация..."></div>
                 </div>
-                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button><button type="button" id="confirmScrap" class="btn btn-danger">Списать</button></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="button" id="confirmScrap" class="btn btn-danger">Списать</button>
+                </div>
             </div>
         </div>
     </div>
@@ -253,7 +346,10 @@
                     <div class="mb-2"><label>Дата окончания гарантии (ДД.ММ.ГГГГ)</label><input id="editWarranty" class="form-control" placeholder="01.01.2026"></div>
                     <div class="mb-2"><label>Статус</label><select id="editStatus" class="form-select"><option value="В эксплуатации">В эксплуатации</option><option value="В ремонте">В ремонте</option><option value="На складе">На складе</option><option value="Списан">Списан</option></select></div>
                 </div>
-                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button><button type="button" id="confirmEdit" class="btn btn-primary">Сохранить</button></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="button" id="confirmEdit" class="btn btn-primary">Сохранить</button>
+                </div>
             </div>
         </div>
     </div>
@@ -268,7 +364,10 @@
                     <p><code id="qrLinkText" style="word-break: break-all;"></code></p>
                     <p>Желаете перейти по ней?</p>
                 </div>
-                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button><a id="qrLinkHref" href="#" target="_blank" class="btn btn-primary" data-bs-dismiss="modal">Перейти</a></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <a id="qrLinkHref" href="#" target="_blank" class="btn btn-primary" data-bs-dismiss="modal">Перейти</a>
+                </div>
             </div>
         </div>
     </div>
@@ -286,7 +385,10 @@
                     <div class="mb-2"><label>Ответственное лицо</label><input id="createResponsible" class="form-control" placeholder="ФИО"></div>
                     <div class="mb-2"><label>Дата окончания гарантии (ДД.ММ.ГГГГ)</label><input id="createWarranty" class="form-control" placeholder="01.01.2026"></div>
                 </div>
-                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button><button type="button" id="confirmCreateDevice" class="btn btn-success">Создать</button></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="button" id="confirmCreateDevice" class="btn btn-success">Создать</button>
+                </div>
             </div>
         </div>
     </div>
@@ -299,7 +401,7 @@
                 <div class="modal-body">
                     <ol>
                         <li><strong>Авторизация</strong> – при первом запуске вы будете анонимно авторизованы. Для отображения вашего имени в истории нажмите на значок пользователя и введите имя.</li>
-                        <li><strong>Сканирование</strong> – нажмите «Сканировать», поднесите камеру к штрих-коду или QR-коду. QR-код со ссылкой предложит перейти по ней. Штрих-код ищет устройство в базе.</li>
+                        <li><strong>Сканирование</strong> – нажмите «Сканировать», поднесите камеру к QR-коду или штрих-коду. QR-код со ссылкой предложит перейти по ней. Штрих-код ищет устройство в базе.</li>
                         <li><strong>Если устройство не найдено</strong> – при наличии интернета будет предложено создать новое устройство. При отсутствии интернета сканирование сохранится в журнал.</li>
                         <li><strong>Карточка</strong> – показывает все данные. Кнопки внизу позволяют изменить статус, передать сотруднику, отправить в ремонт, на склад или списать.</li>
                         <li><strong>Оборотная ведомость</strong> – выберите кабинет, увидите список инвентарных номеров с индикацией наличия.</li>
@@ -309,21 +411,28 @@
                         <li><strong>Тёмная тема</strong> – переключается иконкой луны/солнца в правом нижнем углу навигации.</li>
                     </ol>
                 </div>
-                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- Модалка подтверждения сканирования -->
+    <!-- НОВАЯ МОДАЛКА ПОДТВЕРЖДЕНИЯ СКАНИРОВАНИЯ -->
     <div class="modal fade" id="confirmScanModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
-                <div class="modal-header"><h5 class="modal-title">Распознан штрих-код</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button></div>
+                <div class="modal-header">
+                    <h5 class="modal-title">Распознан штрих-код</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+                </div>
                 <div class="modal-body">
                     <p>Проверьте распознанный номер:</p>
                     <div class="input-group mb-3">
                         <input type="text" id="confirmScanInput" class="form-control form-control-lg text-center" value="">
-                        <button class="btn btn-outline-secondary" type="button" id="confirmScanEditBtn"><i class="bi bi-pencil"></i></button>
+                        <button class="btn btn-outline-secondary" type="button" id="confirmScanEditBtn">
+                            <i class="bi bi-pencil"></i>
+                        </button>
                     </div>
                     <p class="text-muted small">Если номер неверный, отредактируйте его вручную.</p>
                 </div>
@@ -336,15 +445,17 @@
     </div>
 
     <!-- TOAST -->
-    <div class="position-fixed bottom-0 end-0 p-3" style="z-index:1050;">
+    <div class="position-fixed bottom-0 end-0 p-3" style="z-index: 1050;">
         <div id="liveToast" class="toast align-items-center text-white border-0" role="alert">
-            <div class="d-flex"><div class="toast-body" id="toastMessage">Уведомление</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>
+            <div class="d-flex">
+                <div class="toast-body" id="toastMessage">Уведомление</div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
         </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <!-- QuaggaJS -->
-    <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
