@@ -16,13 +16,10 @@
         })();
     </script>
 
-    <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Bootstrap Icons -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-    <!-- Основные стили -->
     <link rel="stylesheet" href="styles.css">
-    <!-- Firebase Auth (compat) -->
+
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 </head>
@@ -61,7 +58,6 @@
                     </button>
                 </div>
 
-                <!-- Пять карточек статистики -->
                 <div class="row g-2 mb-4">
                     <div class="col-6 col-md-2">
                         <div class="stat-card p-2 text-center bg-light rounded">
@@ -95,7 +91,6 @@
                     </div>
                 </div>
 
-                <!-- Кнопки действий -->
                 <div class="d-grid gap-3">
                     <button id="scanBtn" class="btn btn-primary btn-lg py-3 scan-btn">
                         <i class="bi bi-qr-code-scan"></i> Сканировать
@@ -113,7 +108,7 @@
             </div>
         </div>
 
-        <!-- ЭКРАН 2: СКАНЕР (с видео вместо div) -->
+        <!-- ЭКРАН 2: СКАНЕР -->
         <div id="scanner" class="screen">
             <div class="scanner-container">
                 <div class="scanner-header p-2">
@@ -121,7 +116,6 @@
                         <i class="bi bi-arrow-left"></i> Назад
                     </button>
                 </div>
-                <!-- ЗАМЕНА: теперь здесь video -->
                 <video id="reader" style="width:100%; display:block; background:#000;"></video>
                 <div class="manual-input p-3 bg-white">
                     <div class="input-group">
@@ -477,13 +471,13 @@
         </div>
     </div>
 
-    <!-- Подключение Bootstrap JS -->
+    <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
-    <!-- ZXing вместо html5-qrcode -->
-    <script src="https://unpkg.com/@zxing/browser@0.1.1/umd/index.min.js"></script>
+    <!-- ZXing (заменяем на более надёжный CDN) -->
+    <script src="https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.1/umd/index.min.js"></script>
 
-    <!-- Основной app.js (обновлённый под ZXing) -->
+    <!-- Основной app.js -->
     <script src="app.js"></script>
 </body>
 </html>
