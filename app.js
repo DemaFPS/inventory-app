@@ -397,7 +397,8 @@ async function initScanner() {
                 Html5QrcodeSupportedFormats.CODE_39,
                 Html5QrcodeSupportedFormats.CODABAR,
                 Html5QrcodeSupportedFormats.UPC_A,
-                Html5QrcodeSupportedFormats.UPC_E
+                Html5QrcodeSupportedFormats.UPC_E,
+                Html5QrcodeSupportedFormats.EAN_8
             ]
         };
         await scannerInstance.start(
