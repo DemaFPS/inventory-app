@@ -1,5 +1,7 @@
 /**
- * app.js – Оптимизированная версия с улучшенным парсингом дат (ISO + ДД.ММ.ГГГГ)
+ * app.js – Оптимизированная версия с универсальным парсингом дат,
+ * расширенными форматами штрих-кодов и поддержкой отдельного листа History.
+ * Версия с пятью категориями на главном экране и цветовой индикацией статусов.
  */
 
 // ============================
@@ -19,9 +21,9 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 
 // ============================
-// 1. ПРОКСИ URL
+// 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwBbkVP-gFgGnBeETXRPhQIkm25Iaj3j_lFEqjc6yFDe308TuFP-bw_6Un40D_N9wuH/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwclBY36gERG05XSeznY7zy96PANgyYra9BTcQRbMebhZROg0nfavcjdI4u5brD1FE9/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -66,16 +68,13 @@ function validateInventoryNumber(str) {
     return true;
 }
 
-// ===== УНИВЕРСАЛЬНАЯ ФУНКЦИЯ ПАРСИНГА ДАТ =====
+// ===== УНИВЕРСАЛЬНАЯ ФУНКЦИЯ ПАРСИНГА ДАТ (ISO + ДД.ММ.ГГГГ) =====
 function parseDateFromString(dateStr) {
     if (!dateStr) return null;
-    // 1. Пробуем как ISO (новый Date умеет парсить ISO)
     let date = new Date(dateStr);
     if (!isNaN(date.getTime())) {
-        // Если дата валидная, возвращаем её
         return date;
     }
-    // 2. Пробуем как ДД.ММ.ГГГГ
     let clean = String(dateStr).replace(/[^0-9.]/g, '');
     if (!clean) return null;
     const parts = clean.split('.');
@@ -340,14 +339,10 @@ async function addDevice(deviceData) {
 // ============================
 function updateDashboardStats() {
     const total = inventoryData.length;
-
-    // В эксплуатации
     const inUse = inventoryData.filter(d => {
         const status = d && d.status || '';
         return status === 'В эксплуатации';
     }).length;
-
-    // Гарантия истекает или уже истекла (diff <= 30)
     const expiring = inventoryData.filter(d => {
         const date = parseDateFromString(d && d.warrantyEndDate);
         if (!date) return false;
@@ -355,20 +350,15 @@ function updateDashboardStats() {
         const diff = (date - now) / (1000 * 60 * 60 * 24);
         return diff <= 30;
     }).length;
-
-    // В ремонте
     const inRepair = inventoryData.filter(d => {
         const status = d && d.status || '';
         return status === 'В ремонте';
     }).length;
-
-    // Списан / На складе
     const inactive = inventoryData.filter(d => {
         const status = d && d.status || '';
         return status === 'Списан' || status === 'На складе';
     }).length;
 
-    // Обновляем DOM
     document.getElementById('totalCount').textContent = total;
     document.getElementById('inUseCount').textContent = inUse;
     document.getElementById('expiringCount').textContent = expiring;
@@ -377,7 +367,7 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 6. СКАНЕР
+// 6. СКАНЕР – С РАСШИРЕННЫМИ ФОРМАТАМИ
 // ============================
 async function initScanner() {
     if (isInitializingScanner) return;
@@ -399,9 +389,15 @@ async function initScanner() {
         const config = {
             fps: 10,
             qrbox: { width: 250, height: 250 },
+            // ===== РАСШИРЕННЫЕ ФОРМАТЫ =====
             formatsToSupport: [
                 Html5QrcodeSupportedFormats.QR_CODE,
-                Html5QrcodeSupportedFormats.EAN_13
+                Html5QrcodeSupportedFormats.EAN_13,
+                Html5QrcodeSupportedFormats.CODE_128,
+                Html5QrcodeSupportedFormats.CODE_39,
+                Html5QrcodeSupportedFormats.CODABAR,
+                Html5QrcodeSupportedFormats.UPC_A,
+                Html5QrcodeSupportedFormats.UPC_E
             ]
         };
         await scannerInstance.start(
@@ -412,7 +408,7 @@ async function initScanner() {
         );
         isScanning = true;
         isInitializingScanner = false;
-        console.log('Сканер запущен');
+        console.log('Сканер запущен с расширенными форматами');
     } catch (err) {
         console.error('Ошибка запуска сканера:', err);
         showToast('Не удалось получить доступ к камере: ' + err.message, 'danger');
@@ -429,7 +425,7 @@ function stopScanner() {
     }
 }
 
-function onScanSuccess(decodedText, decodedResult) {
+async function onScanSuccess(decodedText, decodedResult) {
     if (!decodedText) {
         console.warn('Пустой результат сканирования');
         return;
@@ -468,7 +464,7 @@ function onScanSuccess(decodedText, decodedResult) {
         console.log('Найдено локально:', device);
         currentDevice = device;
         showScreen('deviceCard');
-        renderDeviceCard(device);
+        await renderDeviceCard(device);   // await
         return;
     }
 
@@ -482,32 +478,33 @@ function onScanSuccess(decodedText, decodedResult) {
     }
 
     showToast('Поиск на сервере...', 'info');
-    loadInventory().then(() => {
+    try {
+        await loadInventory();
         const found = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
         if (found) {
             console.log('Найдено на сервере:', found);
             currentDevice = found;
             showScreen('deviceCard');
-            renderDeviceCard(found);
+            await renderDeviceCard(found);
         } else {
             showCreateDeviceModal(rawText);
         }
-    }).catch(err => {
+    } catch (err) {
         console.error('Ошибка загрузки с сервера:', err);
         const cached = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
         if (cached) {
             currentDevice = cached;
             showScreen('deviceCard');
-            renderDeviceCard(cached);
+            await renderDeviceCard(cached);
         } else {
             showCreateDeviceModal(rawText);
         }
-    });
+    }
 }
 
 function onScanError(err) { /* игнорируем */ }
 
-function handleManualFind() {
+async function handleManualFind() {
     const input = document.getElementById('manualInvInput');
     if (!input) return;
     const rawValue = input.value.trim();
@@ -525,7 +522,7 @@ function handleManualFind() {
     if (device) {
         currentDevice = device;
         showScreen('deviceCard');
-        renderDeviceCard(device);
+        await renderDeviceCard(device);
         stopScanner();
         return;
     }
@@ -537,33 +534,44 @@ function handleManualFind() {
     }
 
     showToast('Поиск на сервере...', 'info');
-    loadInventory().then(() => {
+    try {
+        await loadInventory();
         const found = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
         if (found) {
             currentDevice = found;
             showScreen('deviceCard');
-            renderDeviceCard(found);
+            await renderDeviceCard(found);
             stopScanner();
         } else {
             showCreateDeviceModal(rawValue);
         }
-    }).catch(() => {
+    } catch (e) {
         const cached = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
         if (cached) {
             currentDevice = cached;
             showScreen('deviceCard');
-            renderDeviceCard(cached);
+            await renderDeviceCard(cached);
             stopScanner();
         } else {
             showCreateDeviceModal(rawValue);
         }
-    });
+    }
 }
 
 // ============================
-// 7. КАРТОЧКА УСТРОЙСТВА
+// 7. КАРТОЧКА УСТРОЙСТВА + ЗАГРУЗКА ИСТОРИИ ИЗ ОТДЕЛЬНОГО ЛИСТА
 // ============================
-function renderDeviceCard(device) {
+async function loadDeviceHistory(inventoryNumber) {
+    try {
+        const result = await callProxy('getHistory', { inventoryNumber });
+        return result.history || [];
+    } catch (error) {
+        console.error('Ошибка загрузки истории:', error);
+        return [];
+    }
+}
+
+async function renderDeviceCard(device) {
     if (!device) {
         showToast('Ошибка: устройство не найдено', 'danger');
         return;
@@ -582,16 +590,21 @@ function renderDeviceCard(device) {
     setText('deviceLastModified', device.lastModified || '—');
     setText('deviceInitiator', device.initiator || '—');
 
+    // === ЗАГРУЗКА ИСТОРИИ ИЗ НОВОГО ЛИСТА ===
     const historyContainer = document.getElementById('deviceHistory');
     if (historyContainer) {
-        if (device.history) {
-            const entries = device.history.split(';').filter(s => s.trim());
-            historyContainer.innerHTML = entries.length ? entries.map(e => `<div class="small">${e.trim()}</div>`).join('') : '<div class="text-muted small">Нет записей</div>';
-        } else {
+        historyContainer.innerHTML = '<div class="text-muted small">Загрузка истории...</div>';
+        const history = await loadDeviceHistory(device.inventoryNumber);
+        if (history.length === 0) {
             historyContainer.innerHTML = '<div class="text-muted small">Нет записей</div>';
+        } else {
+            historyContainer.innerHTML = history.map(entry =>
+                `<div class="small">${entry.date} — ${entry.action}${entry.comment ? ' (' + entry.comment + ')' : ''} (${entry.initiator || 'Аноним'})</div>`
+            ).join('');
         }
     }
 
+    // Цвет статуса
     const header = document.getElementById('deviceStatusIndicator');
     if (header) {
         const colorClass = getStatusColorClass(device);
@@ -603,7 +616,7 @@ function renderDeviceCard(device) {
 }
 
 // ============================
-// 8. ОБРАБОТЧИКИ ДЕЙСТВИЙ
+// 8. ОБРАБОТЧИКИ ДЕЙСТВИЙ (с передачей actionDescription и comment)
 // ============================
 async function performDeviceAction(action, data = {}) {
     if (!currentDevice) {
@@ -636,6 +649,8 @@ async function performDeviceAction(action, data = {}) {
 
     let history = currentDevice.history || '';
     let newHistoryEntry = '';
+    let actionDescription = '';
+    let comment = '';
 
     switch (action) {
         case 'transfer':
@@ -644,21 +659,29 @@ async function performDeviceAction(action, data = {}) {
                 return;
             }
             updates.responsiblePerson = data.fio;
-            newHistoryEntry = `${timestamp} Передано сотруднику ${data.fio} (${data.comment || 'без комментария'})`;
+            actionDescription = `Передано сотруднику ${data.fio}`;
+            comment = data.comment || 'без комментария';
+            newHistoryEntry = `${timestamp} Передано сотруднику ${data.fio} (${comment})`;
             break;
         case 'repair':
             updates.status = 'В ремонте';
-            newHistoryEntry = `${timestamp} Отправлено в ремонт (${data.comment || 'без комментария'})`;
+            actionDescription = 'Отправлено в ремонт';
+            comment = data.comment || 'без комментария';
+            newHistoryEntry = `${timestamp} Отправлено в ремонт (${comment})`;
             break;
         case 'stock':
             updates.status = 'На складе';
             updates.responsiblePerson = '';
-            newHistoryEntry = `${timestamp} Перемещено на склад (${data.comment || 'без комментария'})`;
+            actionDescription = 'Перемещено на склад';
+            comment = data.comment || 'без комментария';
+            newHistoryEntry = `${timestamp} Перемещено на склад (${comment})`;
             break;
         case 'scrap':
             updates.status = 'Списан';
             updates.responsiblePerson = '';
-            newHistoryEntry = `${timestamp} Списано (${data.comment || 'причина не указана'})`;
+            actionDescription = 'Списано';
+            comment = data.comment || 'причина не указана';
+            newHistoryEntry = `${timestamp} Списано (${comment})`;
             break;
         case 'edit':
             if (data.model) updates.model = data.model;
@@ -666,16 +689,24 @@ async function performDeviceAction(action, data = {}) {
             if (data.responsiblePerson !== undefined) updates.responsiblePerson = data.responsiblePerson;
             if (data.warrantyEndDate) updates.warrantyEndDate = data.warrantyEndDate;
             if (data.status) updates.status = data.status;
-            newHistoryEntry = `${timestamp} Отредактированы данные (${data.comment || 'без комментария'})`;
+            actionDescription = 'Отредактированы данные';
+            comment = data.comment || 'без комментария';
+            newHistoryEntry = `${timestamp} Отредактированы данные (${comment})`;
             break;
         default:
             showToast('Неизвестное действие', 'danger');
             return;
     }
 
+    // Сохраняем в старое поле истории (для совместимости)
     if (history) history += '; ';
     history += newHistoryEntry;
     updates.history = history;
+
+    // Передаём дополнительные поля для записи в отдельный лист History
+    updates.actionDescription = actionDescription;
+    updates.comment = comment;
+    updates.initiator = initiator;
 
     if (!navigator.onLine) {
         savePendingAction(inv, updates);
@@ -687,13 +718,13 @@ async function performDeviceAction(action, data = {}) {
         const updated = inventoryData.find(d => d && d.inventoryNumber === inv);
         if (updated) {
             currentDevice = updated;
-            renderDeviceCard(updated);
+            await renderDeviceCard(updated);
         } else {
             await loadInventory();
             const reloaded = inventoryData.find(d => d && d.inventoryNumber === inv);
             if (reloaded) {
                 currentDevice = reloaded;
-                renderDeviceCard(reloaded);
+                await renderDeviceCard(reloaded);
             }
         }
         updateDashboardStats();
@@ -838,7 +869,7 @@ async function syncPendingData() {
                     showToast(`Устройство ${item.inventoryNumber} найдено в базе!`, 'success');
                     currentDevice = device;
                     showScreen('deviceCard');
-                    renderDeviceCard(device);
+                    await renderDeviceCard(device);
                     toRemove.push(item);
                 } else {
                     showToast(`Устройство ${item.inventoryNumber} не найдено. Создайте его вручную.`, 'warning');
@@ -1015,7 +1046,7 @@ async function confirmCreateDevice() {
             bootstrap.Modal.getInstance(document.getElementById('createDeviceModal')).hide();
             currentDevice = device;
             showScreen('deviceCard');
-            renderDeviceCard(device);
+            await renderDeviceCard(device);
         }
         return;
     }
@@ -1044,14 +1075,14 @@ async function confirmCreateDevice() {
         if (device) {
             currentDevice = device;
             showScreen('deviceCard');
-            renderDeviceCard(device);
+            await renderDeviceCard(device);
         } else {
             await loadInventory();
             const reloaded = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
             if (reloaded) {
                 currentDevice = reloaded;
                 showScreen('deviceCard');
-                renderDeviceCard(reloaded);
+                await renderDeviceCard(reloaded);
             } else {
                 showToast('Устройство создано, но не найдено. Обновите страницу.', 'warning');
             }
@@ -1063,7 +1094,7 @@ async function confirmCreateDevice() {
             if (device) {
                 currentDevice = device;
                 showScreen('deviceCard');
-                renderDeviceCard(device);
+                await renderDeviceCard(device);
             }
         }
     } finally {
@@ -1315,7 +1346,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                     const updated = inventoryData.find(d => d && d.inventoryNumber === currentDevice.inventoryNumber);
                     if (updated) {
                         currentDevice = updated;
-                        renderDeviceCard(updated);
+                        await renderDeviceCard(updated);
                     }
                 }
                 showToast('Данные обновлены', 'success');
