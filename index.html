@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Инвентаризация</title>
-    <!-- Сразу применяем сохранённую тему (до загрузки стилей) -->
     <script>
         (function() {
             const savedTheme = localStorage.getItem('appTheme');
@@ -17,13 +16,9 @@
         })();
     </script>
 
-    <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Bootstrap Icons -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-    <!-- Основные стили -->
     <link rel="stylesheet" href="styles.css">
-    <!-- Firebase Auth (compat) -->
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 </head>
@@ -45,13 +40,12 @@
         <div class="blob blob-3"></div>
     </div>
 
-    <!-- ===== ОСНОВНОЙ КОНТЕЙНЕР ПРИЛОЖЕНИЯ ===== -->
+    <!-- ===== ОСНОВНОЙ КОНТЕЙНЕР ===== -->
     <div class="app-container" id="appContainer" style="display:none;">
 
-        <!-- ========== ЭКРАН 1: ДАШБОРД ========== -->
+        <!-- ЭКРАН 1: ДАШБОРД -->
         <div id="dashboard" class="screen active">
             <div class="container-fluid p-3">
-                <!-- ХЕДЕР -->
                 <div class="dashboard-header">
                     <h4>Инвентаризация</h4>
                     <span id="userDisplay" class="badge bg-primary header-badge">Аноним</span>
@@ -63,7 +57,7 @@
                     </button>
                 </div>
 
-                <!-- ===== ПЯТЬ КАРТОЧЕК СТАТИСТИКИ ===== -->
+                <!-- Пять карточек статистики -->
                 <div class="row g-2 mb-4">
                     <div class="col-6 col-md-2">
                         <div class="stat-card p-2 text-center bg-light rounded">
@@ -83,7 +77,6 @@
                             <div class="stat-label">Гарантия истекла, истекает</div>
                         </div>
                     </div>
-                    <!-- КОЛОНКА КАРТОЧКИ "В РЕМОНТЕ" С ДОПОЛНИТЕЛЬНЫМ КЛАССОМ -->
                     <div class="col-6 col-md-2 repair-col">
                         <div class="stat-card p-2 text-center bg-light rounded">
                             <div class="stat-number text-danger" id="repairCount">0</div>
@@ -116,7 +109,7 @@
             </div>
         </div>
 
-        <!-- ========== ЭКРАН 2: СКАНЕР ========== -->
+        <!-- ЭКРАН 2: СКАНЕР -->
         <div id="scanner" class="screen">
             <div class="scanner-container">
                 <div class="scanner-header p-2">
@@ -135,7 +128,7 @@
             </div>
         </div>
 
-        <!-- ========== ЭКРАН 3: КАРТОЧКА УСТРОЙСТВА ========== -->
+        <!-- ЭКРАН 3: КАРТОЧКА УСТРОЙСТВА -->
         <div id="deviceCard" class="screen">
             <div class="container-fluid p-3">
                 <div class="d-flex align-items-center mb-3">
@@ -177,7 +170,7 @@
             </div>
         </div>
 
-        <!-- ========== ЭКРАН 4: ОБОРОТНАЯ ВЕДОМОСТЬ ========== -->
+        <!-- ЭКРАН 4: ОБОРОТНАЯ ВЕДОМОСТЬ -->
         <div id="checklist" class="screen">
             <div class="container-fluid p-3">
                 <div class="d-flex align-items-center mb-3">
@@ -207,7 +200,7 @@
             </div>
         </div>
 
-        <!-- ========== ЭКРАН 5: ОТЧЁТ ========== -->
+        <!-- ЭКРАН 5: ОТЧЁТ -->
         <div id="report" class="screen">
             <div class="container-fluid p-3">
                 <div class="d-flex align-items-center mb-3">
@@ -216,7 +209,6 @@
                     </button>
                     <h5 class="mb-0">Отчёт</h5>
                 </div>
-                <!-- Фильтры -->
                 <div class="mb-3">
                     <label class="form-label">Фильтр по кабинету</label>
                     <select id="reportCabinetFilter" class="form-select">
@@ -234,7 +226,7 @@
             </div>
         </div>
 
-        <!-- ========== ЭКРАН 6: ЛОГИ ========== -->
+        <!-- ЭКРАН 6: ЛОГИ -->
         <div id="logs" class="screen">
             <div class="container-fluid p-3">
                 <div class="d-flex align-items-center mb-3">
@@ -261,7 +253,7 @@
             </div>
         </div>
 
-        <!-- ========== НИЖНЯЯ НАВИГАЦИЯ ========== -->
+        <!-- НИЖНЯЯ НАВИГАЦИЯ -->
         <nav class="liquid-nav" id="bottomNav">
             <div class="liquid-glare-container">
                 <div class="liquid-glare" id="glare"></div>
@@ -269,34 +261,19 @@
             <div class="nav-items">
                 <div class="active-pill" id="active-pill"></div>
                 <button class="nav-btn active" data-screen="dashboard">
-                    <div class="btn-content">
-                        <i class="bi bi-house-door"></i>
-                        <span>Главная</span>
-                    </div>
+                    <div class="btn-content"><i class="bi bi-house-door"></i><span>Главная</span></div>
                 </button>
                 <button class="nav-btn" data-screen="scanner">
-                    <div class="btn-content">
-                        <i class="bi bi-qr-code"></i>
-                        <span>Сканер</span>
-                    </div>
+                    <div class="btn-content"><i class="bi bi-qr-code"></i><span>Сканер</span></div>
                 </button>
                 <button class="nav-btn" data-screen="checklist">
-                    <div class="btn-content">
-                        <i class="bi bi-clipboard-check"></i>
-                        <span>Ведомость</span>
-                    </div>
+                    <div class="btn-content"><i class="bi bi-clipboard-check"></i><span>Ведомость</span></div>
                 </button>
                 <button class="nav-btn" data-screen="report">
-                    <div class="btn-content">
-                        <i class="bi bi-file-earmark-text"></i>
-                        <span>Отчёт</span>
-                    </div>
+                    <div class="btn-content"><i class="bi bi-file-earmark-text"></i><span>Отчёт</span></div>
                 </button>
                 <button class="nav-btn" data-screen="logs">
-                    <div class="btn-content">
-                        <i class="bi bi-clock-history"></i>
-                        <span>Логи</span>
-                    </div>
+                    <div class="btn-content"><i class="bi bi-clock-history"></i><span>Логи</span></div>
                 </button>
             </div>
             <div class="divider"></div>
@@ -327,19 +304,10 @@
     <div class="modal fade" id="transferModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Передать сотруднику</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
+                <div class="modal-header"><h5 class="modal-title">Передать сотруднику</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                 <div class="modal-body">
-                    <div class="mb-3">
-                        <label for="transferFio" class="form-label">ФИО сотрудника *</label>
-                        <input type="text" id="transferFio" class="form-control" placeholder="Иванов И.И." required>
-                    </div>
-                    <div class="mb-3">
-                        <label for="transferComment" class="form-label">Комментарий *</label>
-                        <textarea id="transferComment" class="form-control" rows="2" placeholder="Причина передачи" required></textarea>
-                    </div>
+                    <div class="mb-3"><label for="transferFio" class="form-label">ФИО сотрудника *</label><input type="text" id="transferFio" class="form-control" placeholder="Иванов И.И." required></div>
+                    <div class="mb-3"><label for="transferComment" class="form-label">Комментарий *</label><textarea id="transferComment" class="form-control" rows="2" placeholder="Причина передачи" required></textarea></div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
@@ -353,16 +321,10 @@
     <div class="modal fade" id="scrapModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Подтверждение списания</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
+                <div class="modal-header"><h5 class="modal-title">Подтверждение списания</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                 <div class="modal-body">
                     <p>Вы действительно хотите списать устройство <strong id="scrapInventory"></strong>?</p>
-                    <div class="mb-3">
-                        <label for="scrapComment" class="form-label">Причина списания</label>
-                        <input type="text" id="scrapComment" class="form-control" placeholder="Неисправность, утилизация...">
-                    </div>
+                    <div class="mb-3"><label for="scrapComment" class="form-label">Причина списания</label><input type="text" id="scrapComment" class="form-control" placeholder="Неисправность, утилизация..."></div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
@@ -376,36 +338,13 @@
     <div class="modal fade" id="editModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Редактировать устройство</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
+                <div class="modal-header"><h5 class="modal-title">Редактировать устройство</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                 <div class="modal-body">
-                    <div class="mb-2">
-                        <label>Модель</label>
-                        <input id="editModel" class="form-control" placeholder="Модель">
-                    </div>
-                    <div class="mb-2">
-                        <label>Серийный номер</label>
-                        <input id="editSerial" class="form-control" placeholder="SN12345">
-                    </div>
-                    <div class="mb-2">
-                        <label>Ответственное лицо</label>
-                        <input id="editResponsible" class="form-control" placeholder="ФИО">
-                    </div>
-                    <div class="mb-2">
-                        <label>Дата окончания гарантии (ДД.ММ.ГГГГ)</label>
-                        <input id="editWarranty" class="form-control" placeholder="01.01.2026">
-                    </div>
-                    <div class="mb-2">
-                        <label>Статус</label>
-                        <select id="editStatus" class="form-select">
-                            <option value="В эксплуатации">В эксплуатации</option>
-                            <option value="В ремонте">В ремонте</option>
-                            <option value="На складе">На складе</option>
-                            <option value="Списан">Списан</option>
-                        </select>
-                    </div>
+                    <div class="mb-2"><label>Модель</label><input id="editModel" class="form-control" placeholder="Модель"></div>
+                    <div class="mb-2"><label>Серийный номер</label><input id="editSerial" class="form-control" placeholder="SN12345"></div>
+                    <div class="mb-2"><label>Ответственное лицо</label><input id="editResponsible" class="form-control" placeholder="ФИО"></div>
+                    <div class="mb-2"><label>Дата окончания гарантии (ДД.ММ.ГГГГ)</label><input id="editWarranty" class="form-control" placeholder="01.01.2026"></div>
+                    <div class="mb-2"><label>Статус</label><select id="editStatus" class="form-select"><option value="В эксплуатации">В эксплуатации</option><option value="В ремонте">В ремонте</option><option value="На складе">На складе</option><option value="Списан">Списан</option></select></div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
@@ -419,10 +358,7 @@
     <div class="modal fade" id="qrLinkModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">QR-код содержит ссылку</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
+                <div class="modal-header"><h5 class="modal-title">QR-код содержит ссылку</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                 <div class="modal-body">
                     <p>Вы отсканировали QR-код со ссылкой:</p>
                     <p><code id="qrLinkText" style="word-break: break-all;"></code></p>
@@ -440,40 +376,14 @@
     <div class="modal fade" id="createDeviceModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Создать новое устройство</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
+                <div class="modal-header"><h5 class="modal-title">Создать новое устройство</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                 <div class="modal-body">
-                    <div class="mb-2">
-                        <label>Инвентарный номер *</label>
-                        <input id="createInventoryNumber" class="form-control" readonly>
-                    </div>
-                    <div class="mb-2">
-                        <label>Модель</label>
-                        <input id="createModel" class="form-control" placeholder="Модель">
-                    </div>
-                    <div class="mb-2">
-                        <label>Серийный номер</label>
-                        <input id="createSerial" class="form-control" placeholder="SN12345">
-                    </div>
-                    <div class="mb-2">
-                        <label>Статус</label>
-                        <select id="createStatus" class="form-select">
-                            <option value="В эксплуатации">В эксплуатации</option>
-                            <option value="В ремонте">В ремонте</option>
-                            <option value="На складе">На складе</option>
-                            <option value="Списан">Списан</option>
-                        </select>
-                    </div>
-                    <div class="mb-2">
-                        <label>Ответственное лицо</label>
-                        <input id="createResponsible" class="form-control" placeholder="ФИО">
-                    </div>
-                    <div class="mb-2">
-                        <label>Дата окончания гарантии (ДД.ММ.ГГГГ)</label>
-                        <input id="createWarranty" class="form-control" placeholder="01.01.2026">
-                    </div>
+                    <div class="mb-2"><label>Инвентарный номер *</label><input id="createInventoryNumber" class="form-control" readonly></div>
+                    <div class="mb-2"><label>Модель</label><input id="createModel" class="form-control" placeholder="Модель"></div>
+                    <div class="mb-2"><label>Серийный номер</label><input id="createSerial" class="form-control" placeholder="SN12345"></div>
+                    <div class="mb-2"><label>Статус</label><select id="createStatus" class="form-select"><option value="В эксплуатации">В эксплуатации</option><option value="В ремонте">В ремонте</option><option value="На складе">На складе</option><option value="Списан">Списан</option></select></div>
+                    <div class="mb-2"><label>Ответственное лицо</label><input id="createResponsible" class="form-control" placeholder="ФИО"></div>
+                    <div class="mb-2"><label>Дата окончания гарантии (ДД.ММ.ГГГГ)</label><input id="createWarranty" class="form-control" placeholder="01.01.2026"></div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
@@ -487,14 +397,11 @@
     <div class="modal fade" id="helpModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-scrollable">
             <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Краткая инструкция</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
+                <div class="modal-header"><h5 class="modal-title">Краткая инструкция</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                 <div class="modal-body">
                     <ol>
                         <li><strong>Авторизация</strong> – при первом запуске вы будете анонимно авторизованы. Для отображения вашего имени в истории нажмите на значок пользователя и введите имя.</li>
-                        <li><strong>Сканирование</strong> – нажмите «Сканировать», поднесите камеру к QR-коду или штрих-коду (EAN-13). QR-код со ссылкой предложит перейти по ней. Штрих-код ищет устройство в базе.</li>
+                        <li><strong>Сканирование</strong> – нажмите «Сканировать», поднесите камеру к QR-коду или штрих-коду. QR-код со ссылкой предложит перейти по ней. Штрих-код ищет устройство в базе.</li>
                         <li><strong>Если устройство не найдено</strong> – при наличии интернета будет предложено создать новое устройство. При отсутствии интернета сканирование сохранится в журнал.</li>
                         <li><strong>Карточка</strong> – показывает все данные. Кнопки внизу позволяют изменить статус, передать сотруднику, отправить в ремонт, на склад или списать.</li>
                         <li><strong>Оборотная ведомость</strong> – выберите кабинет, увидите список инвентарных номеров с индикацией наличия.</li>
@@ -511,7 +418,7 @@
         </div>
     </div>
 
-    <!-- ===== НОВАЯ МОДАЛКА ПОДТВЕРЖДЕНИЯ СКАНИРОВАНИЯ ===== -->
+    <!-- НОВАЯ МОДАЛКА ПОДТВЕРЖДЕНИЯ СКАНИРОВАНИЯ -->
     <div class="modal fade" id="confirmScanModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
@@ -537,7 +444,7 @@
         </div>
     </div>
 
-    <!-- ===== TOAST ===== -->
+    <!-- TOAST -->
     <div class="position-fixed bottom-0 end-0 p-3" style="z-index: 1050;">
         <div id="liveToast" class="toast align-items-center text-white border-0" role="alert">
             <div class="d-flex">
@@ -547,7 +454,6 @@
         </div>
     </div>
 
-    <!-- Подключение Bootstrap JS и html5-qrcode -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <script src="app.js"></script>

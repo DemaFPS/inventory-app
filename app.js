@@ -1,6 +1,7 @@
 /**
  * app.js – Полная версия с подтверждением сканирования, отдельным листом History,
  * автоопределением форматов штрих-кодов, пятью категориями статистики и цветовой индикацией.
+ * В сканере увеличена область распознавания (qrbox) для лучшего захвата одномерных кодов.
  */
 
 // ============================
@@ -367,7 +368,7 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 6. СКАНЕР – БЕЗ ОГРАНИЧЕНИЙ ПО ФОРМАТАМ, С ПОДТВЕРЖДЕНИЕМ
+// 6. СКАНЕР – С УВЕЛИЧЕННОЙ ОБЛАСТЬЮ РАСПОЗНАВАНИЯ (qrbox) И БЕЗ ОГРАНИЧЕНИЙ ПО ФОРМАТАМ
 // ============================
 async function initScanner() {
     if (isInitializingScanner) return;
@@ -386,11 +387,17 @@ async function initScanner() {
         }
         readerElement.innerHTML = '';
         scannerInstance = new Html5Qrcode("reader");
+
+        // Определяем доступную ширину контейнера для адаптивного qrbox
+        const containerWidth = readerElement.offsetWidth || 400;
+
         const config = {
             fps: 10,
-            qrbox: { width: 250, height: 250 }
+            // === УВЕЛИЧЕННАЯ ОБЛАСТЬ СКАНИРОВАНИЯ (решение 1) ===
+            qrbox: { width: Math.min(containerWidth, 500), height: 350 },
             // formatsToSupport удалён – сканер определяет форматы автоматически
         };
+
         await scannerInstance.start(
             { facingMode: "environment" },
             config,
@@ -399,7 +406,7 @@ async function initScanner() {
         );
         isScanning = true;
         isInitializingScanner = false;
-        console.log('Сканер запущен (автоопределение форматов)');
+        console.log('Сканер запущен с увеличенной областью распознавания');
     } catch (err) {
         console.error('Ошибка запуска сканера:', err);
         showToast('Не удалось получить доступ к камере: ' + err.message, 'danger');
