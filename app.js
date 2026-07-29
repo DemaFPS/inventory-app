@@ -1,6 +1,6 @@
 /**
- * app.js – Полная версия с подтверждением сканирования, отдельным листом History,
- * автоопределением форматов, увеличенной областью сканирования и экспериментальным детектором.
+ * app.js – Полная версия с ZXing для распознавания штрих-кодов (улучшенная поддержка Code 128, Code 39, EAN-13 и др.)
+ * Все остальные функции (прокси, карточки, история, офлайн, отчёты) сохранены.
  */
 
 // ============================
@@ -30,13 +30,13 @@ const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwBbkVP-gFgGnBeETXRPh
 let inventoryData = [];
 let cabinetsData = [];
 let currentDevice = null;
-let scannerInstance = null;
 let isScanning = false;
 let isInitializingScanner = false;
 let currentUser = null;
 let localUserName = localStorage.getItem('localUserName') || 'Аноним';
 let isCreating = false;
 let pendingScanText = '';
+let zxingScanner = null; // экземпляр ZXing
 
 // ============================
 // 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -103,12 +103,25 @@ function showScreen(screenId) {
     document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
     const target = document.getElementById(screenId);
     if (target) target.classList.add('active');
+
     document.querySelectorAll('.nav-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.screen === screenId);
     });
-    if (screenId === 'scanner') { initScanner(); } else { stopScanner(); }
-    if (screenId === 'dashboard') updateDashboardStats();
-    if (screenId === 'logs') renderLogs();
+
+    if (screenId === 'scanner') {
+        initScanner();
+    } else {
+        stopScanner();
+    }
+
+    if (screenId === 'dashboard') {
+        updateDashboardStats();
+    }
+
+    if (screenId === 'logs') {
+        renderLogs();
+    }
+
     setTimeout(updateActivePill, 50);
 }
 
@@ -243,12 +256,14 @@ async function addDevice(deviceData) {
         showToast('Неверный инвентарный номер', 'danger');
         throw new Error('Invalid inventory number');
     }
+
     const normalized = normalizeInventoryNumber(inventoryNumber);
     const localExists = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
     if (localExists) {
         showToast('Устройство с таким номером уже существует (локально)', 'warning');
         throw new Error('Duplicate local');
     }
+
     if (navigator.onLine) {
         try {
             const result = await callProxy('read');
@@ -267,12 +282,14 @@ async function addDevice(deviceData) {
             console.warn('Ошибка проверки на сервере, продолжаем создание:', e);
         }
     }
+
     try {
         const result = await callProxy('add', {
             ...deviceData,
             initiator: getInitiatorName()
         });
         showToast(result.message || 'Устройство создано', 'success');
+
         const now = new Date().toLocaleString('ru-RU');
         const newDevice = {
             inventoryNumber: inventoryNumber,
@@ -288,6 +305,7 @@ async function addDevice(deviceData) {
         inventoryData.push(newDevice);
         localStorage.setItem('inventoryCache', JSON.stringify(inventoryData));
         updateDashboardStats();
+
         return result;
     } catch (error) {
         if (error.message && (error.message.includes('уже существует') || error.message.includes('Duplicate'))) {
@@ -334,46 +352,57 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 6. СКАНЕР (ОБНОВЛЁННЫЙ)
+// 6. СКАНЕР (ZXing)
 // ============================
 async function initScanner() {
     if (isInitializingScanner) return;
-    if (scannerInstance && isScanning) return;
+    if (zxingScanner && isScanning) return;
 
     isInitializingScanner = true;
     try {
-        if (typeof Html5Qrcode === 'undefined') {
-            throw new Error('Библиотека html5-qrcode не загружена.');
+        if (typeof ZXing === 'undefined') {
+            throw new Error('Библиотека ZXing не загружена. Проверьте подключение скрипта.');
         }
-        const readerElement = document.getElementById('reader');
-        if (!readerElement) throw new Error('Элемент #reader не найден');
-        if (scannerInstance) {
-            try { await scannerInstance.stop(); await scannerInstance.clear(); } catch(e) {}
-            scannerInstance = null;
+        const videoElement = document.getElementById('reader');
+        if (!videoElement) throw new Error('Элемент #reader не найден');
+        if (zxingScanner) {
+            try { await zxingScanner.stop(); } catch(e) {}
+            zxingScanner = null;
         }
-        readerElement.innerHTML = '';
-        scannerInstance = new Html5Qrcode("reader");
+        zxingScanner = new ZXing.BrowserMultiFormatReader();
 
-        const containerWidth = readerElement.offsetWidth || 400;
-        const config = {
-            fps: 15,
-            qrbox: { width: Math.min(containerWidth, 500), height: 350 },
-            experimentalFeatures: {
-                useBarCodeDetectorIfSupported: true
+        // Настройка подсказок для форматов
+        const hints = new Map();
+        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+            ZXing.BarcodeFormat.QR_CODE,
+            ZXing.BarcodeFormat.EAN_13,
+            ZXing.BarcodeFormat.EAN_8,
+            ZXing.BarcodeFormat.CODE_128,
+            ZXing.BarcodeFormat.CODE_39,
+            ZXing.BarcodeFormat.CODABAR,
+            ZXing.BarcodeFormat.UPC_A,
+            ZXing.BarcodeFormat.UPC_E
+        ]);
+        hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+        zxingScanner.hints = hints;
+
+        await zxingScanner.decodeFromVideoDevice(
+            undefined, // undefined = выбрать заднюю камеру
+            videoElement,
+            (result) => {
+                if (result && result.text) {
+                    onScanSuccess(result.text);
+                }
+            },
+            (error) => {
+                // Игнорируем промежуточные ошибки
             }
-        };
-
-        await scannerInstance.start(
-            { facingMode: "environment" },
-            config,
-            onScanSuccess,
-            onScanError
         );
         isScanning = true;
         isInitializingScanner = false;
-        console.log('Сканер запущен с экспериментальным детектором');
+        console.log('Сканер ZXing запущен');
     } catch (err) {
-        console.error('Ошибка запуска сканера:', err);
+        console.error('Ошибка запуска сканера ZXing:', err);
         showToast('Не удалось получить доступ к камере: ' + err.message, 'danger');
         document.querySelector('.manual-input').style.display = 'block';
         isInitializingScanner = false;
@@ -381,26 +410,27 @@ async function initScanner() {
 }
 
 function stopScanner() {
-    if (scannerInstance && isScanning) {
+    if (zxingScanner && isScanning) {
         try {
-            scannerInstance.stop().then(() => { isScanning = false; }).catch(err => console.warn('Остановка сканера:', err));
+            zxingScanner.stop().then(() => { isScanning = false; }).catch(err => console.warn('Остановка сканера:', err));
         } catch (e) { console.warn('Ошибка при остановке сканера', e); }
     }
 }
 
-async function onScanSuccess(decodedText, decodedResult) {
+// ============================
+// 7. ОБРАБОТКА РЕЗУЛЬТАТА СКАНИРОВАНИЯ
+// ============================
+async function onScanSuccess(decodedText) {
     if (!decodedText) {
         console.warn('Пустой результат сканирования');
         return;
     }
-    console.log('Распознано:', decodedText);
+    console.log('Распознано ZXing:', decodedText);
     vibrate(100);
     playBeep(true);
     stopScanner();
 
     const rawText = decodedText.trim();
-    let format = decodedResult?.result?.format || decodedResult?.format || '';
-    console.log('Формат:', format);
 
     if (rawText.startsWith('http://') || rawText.startsWith('https://')) {
         console.log('QR-ссылка – диалог перехода');
@@ -427,6 +457,7 @@ async function onScanSuccess(decodedText, decodedResult) {
 
 function onScanError(err) { /* игнорируем */ }
 
+// Обработчики модалки подтверждения
 document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('confirmScanOkBtn')?.addEventListener('click', function() {
         const input = document.getElementById('confirmScanInput');
@@ -450,6 +481,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 
+// ===== ФУНКЦИЯ ОБРАБОТКИ ПОДТВЕРЖДЁННОГО ШТРИХ-КОДА =====
 async function processScannedBarcode(rawText) {
     const normalized = normalizeInventoryNumber(rawText);
     console.log('Поиск устройства по номеру:', normalized);
@@ -497,6 +529,7 @@ async function processScannedBarcode(rawText) {
     }
 }
 
+// ===== ОБРАБОТКА РУЧНОГО ВВОДА =====
 async function handleManualFind() {
     const input = document.getElementById('manualInvInput');
     if (!input) return;
@@ -513,7 +546,7 @@ async function handleManualFind() {
 }
 
 // ============================
-// 7. КАРТОЧКА УСТРОЙСТВА
+// 8. КАРТОЧКА УСТРОЙСТВА + ЗАГРУЗКА ИСТОРИИ
 // ============================
 async function loadDeviceHistory(inventoryNumber) {
     try {
@@ -568,7 +601,7 @@ async function renderDeviceCard(device) {
 }
 
 // ============================
-// 8. ОБРАБОТЧИКИ ДЕЙСТВИЙ
+// 9. ОБРАБОТЧИКИ ДЕЙСТВИЙ
 // ============================
 async function performDeviceAction(action, data = {}) {
     if (!currentDevice) {
@@ -692,7 +725,7 @@ function removePendingAction(inventoryNumber) {
 }
 
 // ============================
-// 9. ОБОРОТНАЯ ВЕДОМОСТЬ
+// 10. ОБОРОТНАЯ ВЕДОМОСТЬ
 // ============================
 async function loadCabinetSelect() {
     const select = document.getElementById('cabinetSelect');
@@ -758,7 +791,7 @@ function renderChecklist(cabinetName) {
 }
 
 // ============================
-// 10. ОФЛАЙН-РЕЖИМ
+// 11. ОФЛАЙН-РЕЖИМ
 // ============================
 function savePendingScan(inventoryNumber, type = 'barcode') {
     let pending = JSON.parse(localStorage.getItem('pendingScans') || '[]');
@@ -873,7 +906,7 @@ async function syncPendingData() {
 }
 
 // ============================
-// 11. ЛОГИ
+// 12. ЛОГИ
 // ============================
 function renderLogs() {
     const container = document.getElementById('logsList');
@@ -946,7 +979,7 @@ window.createFromLog = function(inventoryNumber) {
 };
 
 // ============================
-// 12. МОДАЛКА СОЗДАНИЯ
+// 13. МОДАЛКА СОЗДАНИЯ
 // ============================
 function showCreateDeviceModal(inventoryNumber) {
     document.getElementById('createInventoryNumber').value = inventoryNumber;
@@ -1049,7 +1082,7 @@ async function confirmCreateDevice() {
 }
 
 // ============================
-// 13. ОТЧЁТ
+// 14. ОТЧЁТ
 // ============================
 function generateCSV(data) {
     if (!data || !Array.isArray(data) || data.length === 0) return '';
@@ -1135,7 +1168,7 @@ function printReport() {
 }
 
 // ============================
-// 14. НАВИГАЦИЯ
+// 15. НАВИГАЦИЯ (PILL)
 // ============================
 let navButtons = [];
 let activePill = null;
@@ -1154,7 +1187,7 @@ function updateActivePill(smooth = true) {
 }
 
 // ============================
-// 15. ИНИЦИАЛИЗАЦИЯ
+// 16. ИНИЦИАЛИЗАЦИЯ
 // ============================
 document.addEventListener('DOMContentLoaded', async function() {
     const forceHideLoading = setTimeout(() => {
@@ -1313,6 +1346,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         });
 
+        // Карточка
         document.getElementById('editBtn')?.addEventListener('click', function() {
             if (!currentDevice) {
                 showToast('Устройство не выбрано', 'warning');
