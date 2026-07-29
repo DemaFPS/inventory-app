@@ -1,7 +1,6 @@
 /**
- * app.js – Оптимизированная версия с универсальным парсингом дат,
- * поддержкой отдельного листа History и автоматическим определением форматов штрих-кодов.
- * Версия с пятью категориями на главном экране и цветовой индикацией статусов.
+ * app.js – Полная версия с подтверждением сканирования, отдельным листом History,
+ * автоопределением форматов штрих-кодов, пятью категориями статистики и цветовой индикацией.
  */
 
 // ============================
@@ -37,6 +36,7 @@ let isInitializingScanner = false;
 let currentUser = null;
 let localUserName = localStorage.getItem('localUserName') || 'Аноним';
 let isCreating = false;
+let pendingScanText = ''; // для хранения распознанного текста до подтверждения
 
 // ============================
 // 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -367,7 +367,7 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 6. СКАНЕР – БЕЗ ОГРАНИЧЕНИЙ ПО ФОРМАТАМ
+// 6. СКАНЕР – БЕЗ ОГРАНИЧЕНИЙ ПО ФОРМАТАМ, С ПОДТВЕРЖДЕНИЕМ
 // ============================
 async function initScanner() {
     if (isInitializingScanner) return;
@@ -389,7 +389,7 @@ async function initScanner() {
         const config = {
             fps: 10,
             qrbox: { width: 250, height: 250 }
-            // formatsToSupport удалён – сканер будет пытаться распознать любые форматы
+            // formatsToSupport удалён – сканер определяет форматы автоматически
         };
         await scannerInstance.start(
             { facingMode: "environment" },
@@ -430,6 +430,7 @@ async function onScanSuccess(decodedText, decodedResult) {
     let format = decodedResult?.result?.format || decodedResult?.format || '';
     console.log('Формат:', format);
 
+    // QR-ссылки обрабатываем сразу
     if (rawText.startsWith('http://') || rawText.startsWith('https://')) {
         console.log('QR-ссылка – диалог перехода');
         if (navigator.onLine) {
@@ -447,6 +448,46 @@ async function onScanSuccess(decodedText, decodedResult) {
         return;
     }
 
+    // Для штрих-кодов показываем диалог подтверждения
+    pendingScanText = rawText;
+    document.getElementById('confirmScanInput').value = rawText;
+    const modal = new bootstrap.Modal(document.getElementById('confirmScanModal'));
+    modal.show();
+}
+
+function onScanError(err) { /* игнорируем */ }
+
+// ===== ОБРАБОТЧИКИ МОДАЛКИ ПОДТВЕРЖДЕНИЯ =====
+document.addEventListener('DOMContentLoaded', function() {
+    // Кнопка "Искать / Создать"
+    document.getElementById('confirmScanOkBtn')?.addEventListener('click', function() {
+        const input = document.getElementById('confirmScanInput');
+        let value = input.value.trim();
+        if (!value) {
+            showToast('Номер не может быть пустым', 'warning');
+            return;
+        }
+        const modal = bootstrap.Modal.getInstance(document.getElementById('confirmScanModal'));
+        if (modal) modal.hide();
+        processScannedBarcode(value);
+    });
+
+    // Кнопка редактирования (фокус на поле)
+    document.getElementById('confirmScanEditBtn')?.addEventListener('click', function() {
+        document.getElementById('confirmScanInput').focus();
+        document.getElementById('confirmScanInput').select();
+    });
+
+    // Обработка Enter в поле ввода
+    document.getElementById('confirmScanInput')?.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            document.getElementById('confirmScanOkBtn').click();
+        }
+    });
+});
+
+// ===== ФУНКЦИЯ ОБРАБОТКИ ПОДТВЕРЖДЁННОГО ШТРИХ-КОДА =====
+async function processScannedBarcode(rawText) {
     const normalized = normalizeInventoryNumber(rawText);
     console.log('Поиск устройства по номеру:', normalized);
 
@@ -493,8 +534,7 @@ async function onScanSuccess(decodedText, decodedResult) {
     }
 }
 
-function onScanError(err) { /* игнорируем */ }
-
+// ===== ОБРАБОТКА РУЧНОГО ВВОДА (использует ту же логику) =====
 async function handleManualFind() {
     const input = document.getElementById('manualInvInput');
     if (!input) return;
@@ -507,46 +547,7 @@ async function handleManualFind() {
         showToast('Неверный формат номера (длина 6-20 символов, только буквы/цифры/дефис)', 'danger');
         return;
     }
-    const normalized = normalizeInventoryNumber(rawValue);
-
-    let device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
-    if (device) {
-        currentDevice = device;
-        showScreen('deviceCard');
-        await renderDeviceCard(device);
-        stopScanner();
-        return;
-    }
-
-    if (!navigator.onLine) {
-        savePendingScan(rawValue, 'barcode');
-        showToast('Нет интернета. Номер сохранён в журнале.', 'warning');
-        return;
-    }
-
-    showToast('Поиск на сервере...', 'info');
-    try {
-        await loadInventory();
-        const found = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
-        if (found) {
-            currentDevice = found;
-            showScreen('deviceCard');
-            await renderDeviceCard(found);
-            stopScanner();
-        } else {
-            showCreateDeviceModal(rawValue);
-        }
-    } catch (e) {
-        const cached = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
-        if (cached) {
-            currentDevice = cached;
-            showScreen('deviceCard');
-            await renderDeviceCard(cached);
-            stopScanner();
-        } else {
-            showCreateDeviceModal(rawValue);
-        }
-    }
+    await processScannedBarcode(rawValue);
 }
 
 // ============================

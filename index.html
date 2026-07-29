@@ -511,6 +511,32 @@
         </div>
     </div>
 
+    <!-- ===== НОВАЯ МОДАЛКА ПОДТВЕРЖДЕНИЯ СКАНИРОВАНИЯ ===== -->
+    <div class="modal fade" id="confirmScanModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Распознан штрих-код</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Проверьте распознанный номер:</p>
+                    <div class="input-group mb-3">
+                        <input type="text" id="confirmScanInput" class="form-control form-control-lg text-center" value="">
+                        <button class="btn btn-outline-secondary" type="button" id="confirmScanEditBtn">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                    </div>
+                    <p class="text-muted small">Если номер неверный, отредактируйте его вручную.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="button" class="btn btn-primary" id="confirmScanOkBtn">Искать / Создать</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- ===== TOAST ===== -->
     <div class="position-fixed bottom-0 end-0 p-3" style="z-index: 1050;">
         <div id="liveToast" class="toast align-items-center text-white border-0" role="alert">
