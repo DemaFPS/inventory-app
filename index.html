@@ -51,6 +51,8 @@
                     <button id="changeNameBtn" class="btn btn-outline-secondary btn-sm header-btn" title="Сменить имя"><i class="bi bi-person"></i></button>
                     <button id="refreshDataBtn" class="btn btn-outline-secondary btn-sm header-btn" title="Обновить данные"><i class="bi bi-arrow-clockwise"></i></button>
                 </div>
+
+                <!-- Пять карточек статистики -->
                 <div class="row g-2 mb-4">
                     <div class="col-6 col-md-2"><div class="stat-card p-2 text-center bg-light rounded"><div class="stat-number text-primary" id="totalCount">0</div><div class="stat-label">Всего</div></div></div>
                     <div class="col-6 col-md-2"><div class="stat-card p-2 text-center bg-light rounded"><div class="stat-number text-success" id="inUseCount">0</div><div class="stat-label">В эксплуатации</div></div></div>
@@ -58,6 +60,8 @@
                     <div class="col-6 col-md-2 repair-col"><div class="stat-card p-2 text-center bg-light rounded"><div class="stat-number text-danger" id="repairCount">0</div><div class="stat-label">В ремонте</div></div></div>
                     <div class="col-6 col-md-2 offset-3 offset-md-0"><div class="stat-card p-2 text-center bg-light rounded"><div class="stat-number text-secondary" id="inactiveCount">0</div><div class="stat-label">Списан / На складе</div></div></div>
                 </div>
+
+                <!-- Кнопки действий -->
                 <div class="d-grid gap-3">
                     <button id="scanBtn" class="btn btn-primary btn-lg py-3 scan-btn"><i class="bi bi-qr-code-scan"></i> Сканировать</button>
                     <button id="checklistBtn" class="btn btn-outline-secondary"><i class="bi bi-clipboard-check"></i> Оборотная ведомость</button>
@@ -67,13 +71,14 @@
             </div>
         </div>
 
-        <!-- ЭКРАН 2: СКАНЕР -->
+        <!-- ЭКРАН 2: СКАНЕР (Quagga) -->
         <div id="scanner" class="screen">
             <div class="scanner-container">
                 <div class="scanner-header p-2">
                     <button id="backFromScanner" class="btn btn-outline-light btn-sm"><i class="bi bi-arrow-left"></i> Назад</button>
                 </div>
-                <video id="reader" style="width:100%; display:block; background:#000;"></video>
+                <!-- Контейнер для Quagga -->
+                <div id="interactive" style="width:100%; min-height:60vh; position:relative; background:#000;"></div>
                 <div class="manual-input p-3 bg-white">
                     <div class="input-group">
                         <input type="text" id="manualInvInput" class="form-control" placeholder="Введите инв. номер">
@@ -207,7 +212,8 @@
     </div>
 
     <!-- ===== МОДАЛКИ ===== -->
-    <!-- Передача -->
+
+    <!-- Модалка передачи -->
     <div class="modal fade" id="transferModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
@@ -221,7 +227,7 @@
         </div>
     </div>
 
-    <!-- Списание -->
+    <!-- Модалка списания -->
     <div class="modal fade" id="scrapModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
@@ -235,7 +241,7 @@
         </div>
     </div>
 
-    <!-- Редактирование -->
+    <!-- Модалка редактирования -->
     <div class="modal fade" id="editModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
@@ -252,7 +258,7 @@
         </div>
     </div>
 
-    <!-- QR-ссылка -->
+    <!-- Модалка QR-ссылки -->
     <div class="modal fade" id="qrLinkModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
@@ -267,7 +273,7 @@
         </div>
     </div>
 
-    <!-- Создание устройства -->
+    <!-- Модалка создания устройства -->
     <div class="modal fade" id="createDeviceModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
@@ -285,7 +291,7 @@
         </div>
     </div>
 
-    <!-- Помощь -->
+    <!-- Модалка помощи -->
     <div class="modal fade" id="helpModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-scrollable">
             <div class="modal-content">
@@ -293,7 +299,7 @@
                 <div class="modal-body">
                     <ol>
                         <li><strong>Авторизация</strong> – при первом запуске вы будете анонимно авторизованы. Для отображения вашего имени в истории нажмите на значок пользователя и введите имя.</li>
-                        <li><strong>Сканирование</strong> – нажмите «Сканировать», поднесите камеру к QR-коду или штрих-коду. QR-код со ссылкой предложит перейти по ней. Штрих-код ищет устройство в базе.</li>
+                        <li><strong>Сканирование</strong> – нажмите «Сканировать», поднесите камеру к штрих-коду или QR-коду. QR-код со ссылкой предложит перейти по ней. Штрих-код ищет устройство в базе.</li>
                         <li><strong>Если устройство не найдено</strong> – при наличии интернета будет предложено создать новое устройство. При отсутствии интернета сканирование сохранится в журнал.</li>
                         <li><strong>Карточка</strong> – показывает все данные. Кнопки внизу позволяют изменить статус, передать сотруднику, отправить в ремонт, на склад или списать.</li>
                         <li><strong>Оборотная ведомость</strong> – выберите кабинет, увидите список инвентарных номеров с индикацией наличия.</li>
@@ -308,7 +314,7 @@
         </div>
     </div>
 
-    <!-- Подтверждение сканирования -->
+    <!-- Модалка подтверждения сканирования -->
     <div class="modal fade" id="confirmScanModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
@@ -337,6 +343,8 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- QuaggaJS -->
+    <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

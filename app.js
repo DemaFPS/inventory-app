@@ -1,5 +1,5 @@
 /**
- * app.js – использует нативный BarcodeDetector API (без внешних библиотек)
+ * app.js – финальная версия с QuaggaJS для распознавания одномерных штрих-кодов (включая Code 128B)
  * Все остальные функции (прокси, карточки, история, офлайн) сохранены.
  */
 
@@ -36,9 +36,7 @@ let currentUser = null;
 let localUserName = localStorage.getItem('localUserName') || 'Аноним';
 let isCreating = false;
 let pendingScanText = '';
-let stream = null;
-let barcodeDetector = null;
-let detectionInterval = null;
+let quaggaRunning = false;
 
 // ============================
 // 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -354,98 +352,123 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 6. СКАНЕР (NATIVE BARCODE DETECTOR)
+// 6. СКАНЕР (QuaggaJS)
 // ============================
 async function initScanner() {
     if (isInitializingScanner) return;
-    if (detectionInterval) return;
+    if (quaggaRunning) return;
 
     isInitializingScanner = true;
     try {
-        if (!window.BarcodeDetector) {
-            throw new Error('Ваш браузер не поддерживает встроенный сканер штрих-кодов. Пожалуйста, используйте ручной ввод.');
+        if (typeof Quagga === 'undefined') {
+            throw new Error('Библиотека Quagga не загружена. Проверьте подключение.');
         }
 
-        const videoElement = document.getElementById('reader');
-        if (!videoElement) throw new Error('Элемент #reader не найден');
+        const container = document.getElementById('interactive');
+        if (!container) throw new Error('Элемент #interactive не найден');
 
-        stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } }
-        });
-        videoElement.srcObject = stream;
-        await videoElement.play();
+        // Очищаем контейнер перед инициализацией
+        container.innerHTML = '';
 
-        barcodeDetector = new BarcodeDetector({
-            formats: [
-                'qr_code',
-                'ean_13',
-                'ean_8',
-                'code_128',
-                'code_39',
-                'codabar',
-                'upc_a',
-                'upc_e'
-            ]
-        });
-
-        detectionInterval = setInterval(async () => {
-            if (!videoElement || videoElement.readyState < 2) return;
-            try {
-                const barcodes = await barcodeDetector.detect(videoElement);
-                if (barcodes.length > 0 && barcodes[0].rawValue) {
-                    const value = barcodes[0].rawValue;
-                    stopScanner();
-                    onScanSuccess(value);
+        // Настройка Quagga
+        Quagga.init({
+            inputStream: {
+                name: "Live",
+                type: "LiveStream",
+                target: container,
+                constraints: {
+                    facingMode: "environment",
+                    width: { ideal: 640 },
+                    height: { ideal: 480 }
                 }
-            } catch (e) {
-                // игнорируем ошибки детекции
+            },
+            decoder: {
+                readers: [
+                    "code_128_reader",
+                    "ean_reader",
+                    "ean_8_reader",
+                    "code_39_reader",
+                    "codabar_reader",
+                    "upc_reader",
+                    "upc_e_reader"
+                ],
+                debug: {
+                    showPattern: false,
+                    drawBoundingBox: false,
+                    showFrequency: false,
+                    drawScanline: false,
+                    showCanvas: false
+                }
+            },
+            locate: true
+        }, function(err) {
+            if (err) {
+                console.error('Ошибка инициализации Quagga:', err);
+                showToast('Ошибка инициализации сканера: ' + err.message, 'danger');
+                document.querySelector('.manual-input').style.display = 'block';
+                isInitializingScanner = false;
+                return;
             }
-        }, 200);
+            Quagga.start();
+            quaggaRunning = true;
+            isScanning = true;
+            isInitializingScanner = false;
+            console.log('Quagga сканер запущен');
 
-        isScanning = true;
-        isInitializingScanner = false;
-        console.log('Сканер (BarcodeDetector) запущен');
+            // Обработчик обнаружения
+            Quagga.onDetected(function(result) {
+                if (result && result.codeResult && result.codeResult.code) {
+                    const code = result.codeResult.code;
+                    console.log('Quagga распознал:', code);
+                    // Останавливаем сканер после первого успешного распознавания
+                    stopScanner();
+                    onScanSuccess(code);
+                }
+            });
+        });
+
     } catch (err) {
-        console.error('Ошибка запуска сканера:', err);
-        showToast('Не удалось получить доступ к камере: ' + err.message, 'danger');
+        console.error('Ошибка запуска сканера Quagga:', err);
+        showToast('Не удалось запустить сканер: ' + err.message, 'danger');
         document.querySelector('.manual-input').style.display = 'block';
         isInitializingScanner = false;
-        if (err.message.includes('не поддерживает')) {
-            showToast('Используйте ручной ввод или обновите браузер.', 'warning');
-        }
     }
 }
 
 function stopScanner() {
-    if (detectionInterval) {
-        clearInterval(detectionInterval);
-        detectionInterval = null;
+    if (quaggaRunning) {
+        try {
+            Quagga.stop();
+            quaggaRunning = false;
+            isScanning = false;
+            console.log('Quagga сканер остановлен');
+        } catch (e) {
+            console.warn('Ошибка при остановке Quagga:', e);
+        }
     }
-    if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-        stream = null;
+    // Очищаем контейнер
+    const container = document.getElementById('interactive');
+    if (container) {
+        container.innerHTML = '';
     }
-    const video = document.getElementById('reader');
-    if (video) {
-        video.pause();
-        video.srcObject = null;
-    }
-    barcodeDetector = null;
-    isScanning = false;
 }
 
+// ============================
+// 7. ОБРАБОТКА РЕЗУЛЬТАТА СКАНИРОВАНИЯ
+// ============================
 async function onScanSuccess(decodedText) {
     if (!decodedText) {
         console.warn('Пустой результат сканирования');
         return;
     }
-    console.log('Распознано (BarcodeDetector):', decodedText);
+    console.log('Распознано (Quagga):', decodedText);
     vibrate(100);
     playBeep(true);
     stopScanner();
 
     const rawText = decodedText.trim();
 
+    // QR-ссылки обрабатываем сразу
     if (rawText.startsWith('http://') || rawText.startsWith('https://')) {
         console.log('QR-ссылка – диалог перехода');
         if (navigator.onLine) {
@@ -463,15 +486,14 @@ async function onScanSuccess(decodedText) {
         return;
     }
 
+    // Для штрих-кодов показываем диалог подтверждения
     pendingScanText = rawText;
     document.getElementById('confirmScanInput').value = rawText;
     const modal = new bootstrap.Modal(document.getElementById('confirmScanModal'));
     modal.show();
 }
 
-// ============================
-// 7. ОБРАБОТЧИКИ МОДАЛКИ ПОДТВЕРЖДЕНИЯ
-// ============================
+// Обработчики модалки подтверждения
 document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('confirmScanOkBtn')?.addEventListener('click', function() {
         const input = document.getElementById('confirmScanInput');
@@ -495,6 +517,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 
+// ===== ФУНКЦИЯ ОБРАБОТКИ ПОДТВЕРЖДЁННОГО ШТРИХ-КОДА =====
 async function processScannedBarcode(rawText) {
     const normalized = normalizeInventoryNumber(rawText);
     console.log('Поиск устройства по номеру:', normalized);
@@ -542,6 +565,7 @@ async function processScannedBarcode(rawText) {
     }
 }
 
+// ===== ОБРАБОТКА РУЧНОГО ВВОДА =====
 async function handleManualFind() {
     const input = document.getElementById('manualInvInput');
     if (!input) return;
