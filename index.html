@@ -109,12 +109,16 @@
             </div>
         </div>
 
-        <!-- ЭКРАН 2: СКАНЕР -->
+        <!-- ЭКРАН 2: СКАНЕР (с добавленной кнопкой переключения режима) -->
         <div id="scanner" class="screen">
             <div class="scanner-container">
-                <div class="scanner-header p-2">
+                <div class="scanner-header p-2 d-flex justify-content-between align-items-center">
                     <button id="backFromScanner" class="btn btn-outline-light btn-sm">
                         <i class="bi bi-arrow-left"></i> Назад
+                    </button>
+                    <!-- НОВАЯ КНОПКА ПЕРЕКЛЮЧЕНИЯ РЕЖИМА -->
+                    <button id="toggleLongBarcode" class="btn btn-outline-secondary btn-sm">
+                        🔳 Длинный
                     </button>
                 </div>
                 <div id="reader" style="width:100%;"></div>
@@ -418,7 +422,7 @@
         </div>
     </div>
 
-    <!-- НОВАЯ МОДАЛКА ПОДТВЕРЖДЕНИЯ СКАНИРОВАНИЯ -->
+    <!-- Модалка подтверждения сканирования -->
     <div class="modal fade" id="confirmScanModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">

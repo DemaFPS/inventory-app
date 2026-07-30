@@ -335,7 +335,7 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 6. СКАНЕР (С ПОДДЕРЖКОЙ ПЕРЕВОРОТА И ДЛИННЫХ ШТРИХ-КОДОВ)
+// 6. СКАНЕР (С ПОДДЕРЖКОЙ ПЕРЕВОРОТА И ДЛИННЫХ ШТРИХ-КОДОВ) - ИСПРАВЛЕНА ОШИБКА
 // ============================
 async function initScanner() {
     if (isInitializingScanner) return;
@@ -348,7 +348,7 @@ async function initScanner() {
         }
         const readerElement = document.getElementById('reader');
         if (!readerElement) throw new Error('Элемент #reader не найден');
-        
+
         // Остановить предыдущий экземпляр
         if (scannerInstance) {
             try { await scannerInstance.stop(); await scannerInstance.clear(); } catch(e) {}
@@ -376,15 +376,11 @@ async function initScanner() {
             qrboxHeight = isLandscape ? 220 : 300;
         }
 
-        // Запрос высокого разрешения камеры
-        const constraints = {
-            facingMode: "environment",
-            width: { ideal: 1920 },
-            height: { ideal: 1080 }
-        };
+        // ✅ ИСПРАВЛЕНО: передаём только { facingMode: "environment" }
+        const cameraConfig = { facingMode: "environment" };
 
         const config = {
-            fps: longBarcodeMode ? 12 : 20, // при длинных кодах меньше FPS для лучшего качества
+            fps: longBarcodeMode ? 12 : 20,
             qrbox: {
                 width: qrboxWidth,
                 height: qrboxHeight
@@ -392,7 +388,6 @@ async function initScanner() {
             experimentalFeatures: {
                 useBarCodeDetectorIfSupported: true
             },
-            // Добавляем поддержку более широкого спектра форматов (необязательно)
             formatsToSupport: [
                 Html5QrcodeSupportedFormats.CODE_128,
                 Html5QrcodeSupportedFormats.CODE_39,
@@ -412,7 +407,7 @@ async function initScanner() {
         console.log('Сканер инициализирован с размерами:', config.qrbox, 'Ориентация:', isLandscape ? 'альбомная' : 'портретная', 'Режим:', longBarcodeMode ? 'длинный штрих-код' : 'обычный');
 
         await scannerInstance.start(
-            constraints,
+            cameraConfig,   // ✅ теперь объект только с одним ключом
             config,
             onScanSuccess,
             onScanError
@@ -521,7 +516,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Кнопка переключения режима длинного штрих-кода
+    // Кнопка переключения режима длинного штрих-кода (ДОБАВЬТЕ ЕЁ В HTML)
     const toggleLongBarcodeBtn = document.getElementById('toggleLongBarcode');
     if (toggleLongBarcodeBtn) {
         toggleLongBarcodeBtn.addEventListener('click', function() {
