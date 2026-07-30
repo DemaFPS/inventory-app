@@ -2,7 +2,7 @@
 <html lang="ru" data-theme="light">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Инвентаризация</title>
     <script>
         (function() {
@@ -21,136 +21,6 @@
     <link rel="stylesheet" href="styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
-
-    <style>
-        /* ===== АЛЬБОМНАЯ ОРИЕНТАЦИЯ ДЛЯ СКАНЕРА ===== */
-        @media (orientation: landscape) {
-            .app-container {
-                max-width: 100% !important;
-                border-radius: 0 !important;
-                min-height: 100vh !important;
-                padding-bottom: 0 !important;
-            }
-            #reader {
-                max-height: 85vh !important;
-                min-height: 85vh !important;
-                width: 100% !important;
-            }
-            .scanner-container {
-                min-height: 100vh !important;
-                border-radius: 0 !important;
-            }
-            .scanner-header {
-                background: rgba(0,0,0,0.6) !important;
-                position: absolute !important;
-                top: 0 !important;
-                left: 0 !important;
-                right: 0 !important;
-                z-index: 10 !important;
-                padding: 8px 12px !important;
-            }
-            .manual-input {
-                position: fixed !important;
-                bottom: 20px !important;
-                left: 20px !important;
-                right: 20px !important;
-                background: rgba(255,255,255,0.92) !important;
-                backdrop-filter: blur(10px) !important;
-                -webkit-backdrop-filter: blur(10px) !important;
-                border-radius: 20px !important;
-                padding: 12px 16px !important;
-                box-shadow: 0 4px 20px rgba(0,0,0,0.3) !important;
-                border: 1px solid rgba(255,255,255,0.2) !important;
-                z-index: 20 !important;
-            }
-            .manual-input .input-group {
-                max-width: 90% !important;
-                margin: 0 auto !important;
-            }
-            .liquid-nav {
-                display: none !important;
-            }
-            #reader video {
-                object-fit: cover !important;
-                height: 100% !important;
-            }
-        }
-
-        @media (orientation: portrait) {
-            .liquid-nav {
-                display: flex !important;
-            }
-        }
-
-        @media (min-width: 768px) and (orientation: landscape) {
-            #reader {
-                max-height: 90vh !important;
-                min-height: 90vh !important;
-            }
-            .manual-input {
-                max-width: 600px !important;
-                left: 50% !important;
-                transform: translateX(-50%) !important;
-                bottom: 30px !important;
-            }
-        }
-
-        [data-theme="dark"] @media (orientation: landscape) {
-            .manual-input {
-                background: rgba(30,30,40,0.92) !important;
-                border-color: rgba(255,255,255,0.1) !important;
-            }
-            .manual-input input {
-                background: rgba(255,255,255,0.1) !important;
-                color: #e0e0e0 !important;
-                border-color: rgba(255,255,255,0.15) !important;
-            }
-            .manual-input input::placeholder {
-                color: #888 !important;
-            }
-        }
-
-        #reader {
-            background: #000 !important;
-        }
-        .scanner-container {
-            position: relative !important;
-            background: #000 !important;
-        }
-        .scanner-header .btn-outline-light:hover {
-            background: rgba(255,255,255,0.2) !important;
-        }
-        #reader::after {
-            content: '';
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            height: 2px;
-            background: linear-gradient(90deg, transparent, #00f2fe, transparent);
-            animation: scanLine 2s linear infinite;
-            opacity: 0.5;
-            z-index: 5;
-            pointer-events: none;
-        }
-        @keyframes scanLine {
-            0% { transform: translateY(0%); }
-            50% { transform: translateY(100%); }
-            100% { transform: translateY(0%); }
-        }
-        /* Стиль для кнопки фото */
-        #photoBtn {
-            transition: all 0.3s ease;
-            font-weight: 500;
-        }
-        #photoBtn:hover {
-            transform: scale(1.05);
-            box-shadow: 0 4px 15px rgba(0,0,0,0.4) !important;
-        }
-        #photoBtn:active {
-            transform: scale(0.95);
-        }
-    </style>
 </head>
 <body>
 
@@ -239,7 +109,7 @@
             </div>
         </div>
 
-        <!-- ЭКРАН 2: СКАНЕР (С КНОПКОЙ ФОТО) -->
+        <!-- ЭКРАН 2: СКАНЕР -->
         <div id="scanner" class="screen">
             <div class="scanner-container">
                 <div class="scanner-header p-2">
@@ -247,13 +117,7 @@
                         <i class="bi bi-arrow-left"></i> Назад
                     </button>
                 </div>
-                <!-- КНОПКА ФОТОСЪЁМКИ -->
-                <div style="position:absolute; top:60px; left:0; right:0; z-index:20; display:flex; justify-content:center; pointer-events:none;">
-                    <button id="photoBtn" class="btn btn-light btn-sm" style="display:none; border-radius:30px; padding:8px 20px; box-shadow:0 2px 10px rgba(0,0,0,0.3); pointer-events:auto; font-weight:500; background:rgba(255,255,255,0.9); backdrop-filter:blur(5px);">
-                        <i class="bi bi-camera"></i> 📷 Сфотографировать
-                    </button>
-                </div>
-                <div id="reader" style="width:100%; min-height:60vh; background:#000;"></div>
+                <div id="reader" style="width:100%;"></div>
                 <div class="manual-input p-3 bg-white">
                     <div class="input-group">
                         <input type="text" id="manualInvInput" class="form-control" placeholder="Введите инв. номер">
@@ -554,7 +418,7 @@
         </div>
     </div>
 
-    <!-- МОДАЛКА ПОДТВЕРЖДЕНИЯ СКАНИРОВАНИЯ -->
+    <!-- НОВАЯ МОДАЛКА ПОДТВЕРЖДЕНИЯ СКАНИРОВАНИЯ -->
     <div class="modal fade" id="confirmScanModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
@@ -575,31 +439,6 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
                     <button type="button" class="btn btn-primary" id="confirmScanOkBtn">Искать / Создать</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- МОДАЛКА ПРЕВЬЮ ФОТО -->
-    <div class="modal fade" id="photoPreviewModal" tabindex="-1" data-bs-backdrop="static">
-        <div class="modal-dialog modal-dialog-centered modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">📷 Фото штрих-кода</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body text-center">
-                    <img id="photoPreviewImage" src="" class="img-fluid rounded" style="max-height: 60vh;">
-                    <div class="mt-3">
-                        <div class="spinner-border text-primary" id="photoScanningSpinner" role="status">
-                            <span class="visually-hidden">Распознавание...</span>
-                        </div>
-                        <p id="photoScanStatus" class="mt-2">Распознавание...</p>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
-                    <button type="button" class="btn btn-primary" id="photoRetakeBtn">📷 Переснять</button>
                 </div>
             </div>
         </div>
