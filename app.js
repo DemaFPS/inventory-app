@@ -1,7 +1,6 @@
 /**
- * app.js – Полная версия с подтверждением сканирования, отдельным листом History,
- * автоопределением форматов, увеличенной областью сканирования, экспериментальным детектором
- * и ПОДДЕРЖКОЙ ПЕРЕВОРОТА ЭКРАНА для сканирования длинных штрих-кодов.
+ * app.js – Полная версия с функцией ФОТОСЪЁМКИ для длинных штрих-кодов
+ * Теперь можно сфотографировать код и распознать по фото.
  */
 
 // ============================
@@ -38,6 +37,8 @@ let currentUser = null;
 let localUserName = localStorage.getItem('localUserName') || 'Аноним';
 let isCreating = false;
 let pendingScanText = '';
+let videoElement = null;
+let photoCanvas = null;
 
 // ============================
 // 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -335,7 +336,7 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 6. СКАНЕР (С ПОДДЕРЖКОЙ ПЕРЕВОРОТА ЭКРАНА)
+// 6. СКАНЕР С ФУНКЦИЕЙ ФОТОСЪЁМКИ
 // ============================
 async function initScanner() {
     if (isInitializingScanner) return;
@@ -348,6 +349,22 @@ async function initScanner() {
         }
         const readerElement = document.getElementById('reader');
         if (!readerElement) throw new Error('Элемент #reader не найден');
+        
+        // Сохраняем ссылку на видео-элемент для фото
+        const video = readerElement.querySelector('video');
+        if (video) {
+            videoElement = video;
+        }
+
+        // Создаём canvas для фото
+        if (!photoCanvas) {
+            photoCanvas = document.createElement('canvas');
+        }
+
+        // Показываем кнопку фото
+        const photoBtn = document.getElementById('photoBtn');
+        if (photoBtn) photoBtn.style.display = 'flex';
+
         if (scannerInstance) {
             try { await scannerInstance.stop(); await scannerInstance.clear(); } catch(e) {}
             scannerInstance = null;
@@ -355,41 +372,66 @@ async function initScanner() {
         readerElement.innerHTML = '';
         scannerInstance = new Html5Qrcode("reader");
 
-        // Определяем размеры с учётом ориентации
         const containerWidth = readerElement.offsetWidth || 400;
+        const containerHeight = readerElement.offsetHeight || 500;
         const isLandscape = window.innerWidth > window.innerHeight;
 
-        // В альбомной ориентации делаем область шире
         const qrboxWidth = isLandscape 
-            ? Math.min(containerWidth - 20, 800)  // в ландшафте до 800px
-            : Math.min(containerWidth - 20, 500); // в портрете до 500px
+            ? Math.min(containerWidth - 10, 900)
+            : Math.min(containerWidth - 10, 550);
+
+        const qrboxHeight = isLandscape 
+            ? Math.min(containerHeight - 100, 300)
+            : Math.min(containerHeight - 100, 400);
 
         const config = {
-            fps: 20,
+            fps: 30,
             qrbox: {
                 width: qrboxWidth,
-                height: isLandscape ? 200 : 280  // в ландшафте ниже
+                height: qrboxHeight
             },
+            formatsToSupport: [
+                Html5QrcodeSupportedFormats.CODE_128,
+                Html5QrcodeSupportedFormats.QR_CODE,
+                Html5QrcodeSupportedFormats.EAN_13,
+                Html5QrcodeSupportedFormats.CODE_39,
+                Html5QrcodeSupportedFormats.CODABAR
+            ],
             experimentalFeatures: {
                 useBarCodeDetectorIfSupported: true
-            }
+            },
+            aspectRatio: 1.0
         };
 
-        console.log('Сканер инициализирован с размерами:', config.qrbox, 'Ориентация:', isLandscape ? 'альбомная' : 'портретная');
+        console.log('Сканер инициализирован с размерами:', config.qrbox);
 
         await scannerInstance.start(
-            { facingMode: "environment" },
+            { 
+                facingMode: "environment",
+                width: { ideal: 1920 },
+                height: { ideal: 1080 }
+            },
             config,
-            onScanSuccess,
-            onScanError
+            function(decodedText, decodedResult) {
+                if (decodedText && decodedText.length > 0) {
+                    console.log('Распознано:', decodedText);
+                    stopScanner();
+                    onScanSuccess(decodedText, decodedResult);
+                }
+            },
+            function(error) {
+                // игнорируем
+            }
         );
         isScanning = true;
         isInitializingScanner = false;
-        console.log('Сканер запущен с поддержкой переворота экрана');
+        console.log('Сканер запущен с функцией фотосъёмки');
     } catch (err) {
         console.error('Ошибка запуска сканера:', err);
         showToast('Не удалось получить доступ к камере: ' + err.message, 'danger');
         document.querySelector('.manual-input').style.display = 'block';
+        const photoBtn = document.getElementById('photoBtn');
+        if (photoBtn) photoBtn.style.display = 'none';
         isInitializingScanner = false;
     }
 }
@@ -399,6 +441,141 @@ function stopScanner() {
         try {
             scannerInstance.stop().then(() => { isScanning = false; }).catch(err => console.warn('Остановка сканера:', err));
         } catch (e) { console.warn('Ошибка при остановке сканера', e); }
+    }
+    const photoBtn = document.getElementById('photoBtn');
+    if (photoBtn) photoBtn.style.display = 'none';
+}
+
+// ===== ФУНКЦИЯ ФОТОСЪЁМКИ =====
+function takePhoto() {
+    if (!videoElement) {
+        const reader = document.getElementById('reader');
+        if (reader) {
+            videoElement = reader.querySelector('video');
+        }
+    }
+    
+    if (!videoElement) {
+        showToast('Видео-поток не найден. Попробуйте перезапустить сканер.', 'warning');
+        return;
+    }
+
+    try {
+        const canvas = photoCanvas;
+        const context = canvas.getContext('2d');
+        
+        const videoWidth = videoElement.videoWidth || 640;
+        const videoHeight = videoElement.videoHeight || 480;
+        
+        const readerRect = document.getElementById('reader').getBoundingClientRect();
+        const scanArea = {
+            x: readerRect.width * 0.1,
+            y: readerRect.height * 0.15,
+            width: readerRect.width * 0.8,
+            height: readerRect.height * 0.7
+        };
+        
+        canvas.width = videoWidth;
+        canvas.height = videoHeight;
+        
+        context.drawImage(videoElement, 0, 0, videoWidth, videoHeight);
+        
+        showPhotoPreview(canvas);
+        
+    } catch (error) {
+        console.error('Ошибка при фотосъёмке:', error);
+        showToast('Ошибка при создании фото: ' + error.message, 'danger');
+    }
+}
+
+// ===== ПОКАЗ ПРЕВЬЮ ФОТО И РАСПОЗНАВАНИЕ =====
+function showPhotoPreview(canvas) {
+    const modalHtml = `
+        <div class="modal fade" id="photoPreviewModal" tabindex="-1" data-bs-backdrop="static">
+            <div class="modal-dialog modal-dialog-centered modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">📷 Фото штрих-кода</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body text-center">
+                        <img id="photoPreviewImage" src="${canvas.toDataURL('image/jpeg', 0.95)}" class="img-fluid rounded" style="max-height: 60vh;">
+                        <div class="mt-3">
+                            <div class="spinner-border text-primary" id="photoScanningSpinner" role="status">
+                                <span class="visually-hidden">Распознавание...</span>
+                            </div>
+                            <p id="photoScanStatus" class="mt-2">Распознавание...</p>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+                        <button type="button" class="btn btn-primary" id="photoRetakeBtn">📷 Переснять</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    const oldModal = document.getElementById('photoPreviewModal');
+    if (oldModal) oldModal.remove();
+
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    const modal = new bootstrap.Modal(document.getElementById('photoPreviewModal'));
+    modal.show();
+
+    recognizeFromPhoto(canvas);
+}
+
+// ===== РАСПОЗНАВАНИЕ ПО ФОТО =====
+async function recognizeFromPhoto(canvas) {
+    const imgElement = document.getElementById('photoPreviewImage');
+    const spinner = document.getElementById('photoScanningSpinner');
+    const status = document.getElementById('photoScanStatus');
+
+    try {
+        if (typeof Html5Qrcode === 'undefined') {
+            throw new Error('Библиотека html5-qrcode не загружена');
+        }
+
+        const tempScanner = new Html5Qrcode('tempReader');
+        const tempContainer = document.createElement('div');
+        tempContainer.id = 'tempReader';
+        tempContainer.style.display = 'none';
+        document.body.appendChild(tempContainer);
+
+        const result = await tempScanner.scanFile(canvas.toDataURL('image/jpeg', 0.9), true);
+        
+        tempContainer.remove();
+
+        if (result && result.decodedText) {
+            status.textContent = '✅ Распознано: ' + result.decodedText;
+            spinner.style.display = 'none';
+            
+            setTimeout(() => {
+                const modal = bootstrap.Modal.getInstance(document.getElementById('photoPreviewModal'));
+                if (modal) modal.hide();
+                onScanSuccess(result.decodedText, result);
+            }, 1000);
+        } else {
+            throw new Error('Не удалось распознать код');
+        }
+
+    } catch (error) {
+        console.error('Ошибка распознавания по фото:', error);
+        status.textContent = '❌ Не удалось распознать: ' + error.message;
+        spinner.style.display = 'none';
+        
+        const retryBtn = document.createElement('button');
+        retryBtn.className = 'btn btn-warning mt-2';
+        retryBtn.textContent = '🔄 Попробовать снова';
+        retryBtn.onclick = function() {
+            status.textContent = 'Распознавание...';
+            spinner.style.display = 'inline-block';
+            this.remove();
+            recognizeFromPhoto(canvas);
+        };
+        document.querySelector('#photoPreviewModal .modal-body').appendChild(retryBtn);
     }
 }
 
@@ -444,6 +621,7 @@ async function onScanSuccess(decodedText, decodedResult) {
 
 function onScanError(err) { /* игнорируем */ }
 
+// Обработчики модалки подтверждения
 document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('confirmScanOkBtn')?.addEventListener('click', function() {
         const input = document.getElementById('confirmScanInput');
@@ -466,10 +644,21 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    // Кнопка фото
+    document.getElementById('photoBtn')?.addEventListener('click', takePhoto);
+    
+    // Кнопка переснять
+    document.addEventListener('click', function(e) {
+        if (e.target.id === 'photoRetakeBtn' || e.target.closest('#photoRetakeBtn')) {
+            const modal = bootstrap.Modal.getInstance(document.getElementById('photoPreviewModal'));
+            if (modal) modal.hide();
+            setTimeout(takePhoto, 300);
+        }
+    });
+
     // Перезапуск сканера при изменении ориентации экрана
     window.addEventListener('resize', function() {
         if (document.getElementById('scanner').classList.contains('active')) {
-            // Если сканер активен, перезапускаем его с новыми размерами
             stopScanner();
             setTimeout(() => {
                 initScanner();
@@ -477,7 +666,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Слушаем событие изменения ориентации (более надёжно для мобильных)
     window.addEventListener('orientationchange', function() {
         if (document.getElementById('scanner').classList.contains('active')) {
             setTimeout(() => {

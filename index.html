@@ -67,25 +67,21 @@
                 max-width: 90% !important;
                 margin: 0 auto !important;
             }
-            /* Скрываем нижнюю навигацию в альбомной ориентации */
             .liquid-nav {
                 display: none !important;
             }
-            /* Увеличиваем область видео */
             #reader video {
                 object-fit: cover !important;
                 height: 100% !important;
             }
         }
 
-        /* ===== ПОРТРЕТНАЯ ОРИЕНТАЦИЯ (по умолчанию) ===== */
         @media (orientation: portrait) {
             .liquid-nav {
                 display: flex !important;
             }
         }
 
-        /* ===== АДАПТИВ ДЛЯ ПЛАНШЕТОВ И КОМПЬЮТЕРОВ ===== */
         @media (min-width: 768px) and (orientation: landscape) {
             #reader {
                 max-height: 90vh !important;
@@ -99,7 +95,6 @@
             }
         }
 
-        /* Тёмная тема для альбомной ориентации */
         [data-theme="dark"] @media (orientation: landscape) {
             .manual-input {
                 background: rgba(30,30,40,0.92) !important;
@@ -115,7 +110,6 @@
             }
         }
 
-        /* Дополнительные улучшения для сканера */
         #reader {
             background: #000 !important;
         }
@@ -126,7 +120,6 @@
         .scanner-header .btn-outline-light:hover {
             background: rgba(255,255,255,0.2) !important;
         }
-        /* Анимация сканирования (опционально) */
         #reader::after {
             content: '';
             position: absolute;
@@ -137,11 +130,25 @@
             background: linear-gradient(90deg, transparent, #00f2fe, transparent);
             animation: scanLine 2s linear infinite;
             opacity: 0.5;
+            z-index: 5;
+            pointer-events: none;
         }
         @keyframes scanLine {
             0% { transform: translateY(0%); }
             50% { transform: translateY(100%); }
             100% { transform: translateY(0%); }
+        }
+        /* Стиль для кнопки фото */
+        #photoBtn {
+            transition: all 0.3s ease;
+            font-weight: 500;
+        }
+        #photoBtn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.4) !important;
+        }
+        #photoBtn:active {
+            transform: scale(0.95);
         }
     </style>
 </head>
@@ -232,12 +239,18 @@
             </div>
         </div>
 
-        <!-- ЭКРАН 2: СКАНЕР -->
+        <!-- ЭКРАН 2: СКАНЕР (С КНОПКОЙ ФОТО) -->
         <div id="scanner" class="screen">
             <div class="scanner-container">
                 <div class="scanner-header p-2">
                     <button id="backFromScanner" class="btn btn-outline-light btn-sm">
                         <i class="bi bi-arrow-left"></i> Назад
+                    </button>
+                </div>
+                <!-- КНОПКА ФОТОСЪЁМКИ -->
+                <div style="position:absolute; top:60px; left:0; right:0; z-index:20; display:flex; justify-content:center; pointer-events:none;">
+                    <button id="photoBtn" class="btn btn-light btn-sm" style="display:none; border-radius:30px; padding:8px 20px; box-shadow:0 2px 10px rgba(0,0,0,0.3); pointer-events:auto; font-weight:500; background:rgba(255,255,255,0.9); backdrop-filter:blur(5px);">
+                        <i class="bi bi-camera"></i> 📷 Сфотографировать
                     </button>
                 </div>
                 <div id="reader" style="width:100%; min-height:60vh; background:#000;"></div>
@@ -562,6 +575,31 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
                     <button type="button" class="btn btn-primary" id="confirmScanOkBtn">Искать / Создать</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- МОДАЛКА ПРЕВЬЮ ФОТО -->
+    <div class="modal fade" id="photoPreviewModal" tabindex="-1" data-bs-backdrop="static">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">📷 Фото штрих-кода</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body text-center">
+                    <img id="photoPreviewImage" src="" class="img-fluid rounded" style="max-height: 60vh;">
+                    <div class="mt-3">
+                        <div class="spinner-border text-primary" id="photoScanningSpinner" role="status">
+                            <span class="visually-hidden">Распознавание...</span>
+                        </div>
+                        <p id="photoScanStatus" class="mt-2">Распознавание...</p>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+                    <button type="button" class="btn btn-primary" id="photoRetakeBtn">📷 Переснять</button>
                 </div>
             </div>
         </div>
