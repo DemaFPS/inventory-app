@@ -1,7 +1,8 @@
 /**
- * app.js – Улучшенная версия с увеличенной областью сканирования,
- * поддержкой фото (снимок + загрузка) и превью захваченного кадра.
- * ИСПРАВЛЕНА ОШИБКА scanFile (теперь используется Promise).
+ * app.js – Полная версия с подтверждением сканирования, отдельным листом History,
+ * автоопределением форматов, увеличенной областью сканирования, экспериментальным детектором,
+ * поддержкой переворота экрана для сканирования длинных штрих-кодов
+ * и ДОБАВЛЕННЫМ распознаванием с фотографии (снимок камеры / загрузка файла).
  */
 
 // ============================
@@ -38,7 +39,7 @@ let currentUser = null;
 let localUserName = localStorage.getItem('localUserName') || 'Аноним';
 let isCreating = false;
 let pendingScanText = '';
-let isProcessingImage = false;
+let isProcessingImage = false; // флаг для обработки фото
 
 // ============================
 // 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -336,7 +337,7 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 6. СКАНЕР (УВЕЛИЧЕННАЯ ОБЛАСТЬ)
+// 6. СКАНЕР (С ПОДДЕРЖКОЙ ПЕРЕВОРОТА ЭКРАНА)
 // ============================
 async function initScanner() {
     if (isInitializingScanner) return;
@@ -356,19 +357,17 @@ async function initScanner() {
         readerElement.innerHTML = '';
         scannerInstance = new Html5Qrcode("reader");
 
-        const containerWidth = readerElement.offsetWidth || window.innerWidth - 32;
-        const containerHeight = readerElement.offsetHeight || window.innerHeight - 200;
+        const containerWidth = readerElement.offsetWidth || 400;
         const isLandscape = window.innerWidth > window.innerHeight;
-
-        // Увеличиваем область сканирования до 90% ширины и 60% высоты
-        const qrboxWidth = Math.min(containerWidth * 0.90, 900);
-        const qrboxHeight = Math.min(containerHeight * 0.60, 600);
+        const qrboxWidth = isLandscape 
+            ? Math.min(containerWidth - 20, 800)
+            : Math.min(containerWidth - 20, 500);
 
         const config = {
             fps: 20,
             qrbox: {
                 width: qrboxWidth,
-                height: qrboxHeight
+                height: isLandscape ? 200 : 280
             },
             experimentalFeatures: {
                 useBarCodeDetectorIfSupported: true
@@ -445,23 +444,16 @@ async function onScanSuccess(decodedText, decodedResult) {
 function onScanError(err) { /* игнорируем */ }
 
 // ============================
-// 7.1 РАСПОЗНАВАНИЕ С ФОТОГРАФИИ (ИСПРАВЛЕННАЯ ВЕРСИЯ - PROMISE)
+// 7.1 РАСПОЗНАВАНИЕ С ФОТОГРАФИИ (ДОБАВЛЕНО)
 // ============================
 function captureAndScan() {
     if (isProcessingImage) return;
-    
     const videoElement = document.querySelector('#reader video');
     if (!videoElement) {
         showToast('Камера не активна', 'warning');
         return;
     }
 
-    if (videoElement.readyState < 2) {
-        showToast('Подождите, камера ещё не готова', 'warning');
-        return;
-    }
-
-    // Останавливаем сканер на время обработки
     if (scannerInstance && isScanning) {
         stopScanner();
     }
@@ -470,19 +462,11 @@ function captureAndScan() {
     showToast('Захват кадра...', 'info');
 
     try {
-        const videoWidth = videoElement.videoWidth || 1280;
-        const videoHeight = videoElement.videoHeight || 720;
-        console.log('Размер видео:', videoWidth, 'x', videoHeight);
-
         const canvas = document.createElement('canvas');
-        canvas.width = videoWidth;
-        canvas.height = videoHeight;
+        canvas.width = videoElement.videoWidth || 1280;
+        canvas.height = videoElement.videoHeight || 720;
         const ctx = canvas.getContext('2d');
-        ctx.drawImage(videoElement, 0, 0, videoWidth, videoHeight);
-
-        // Показываем превью захваченного кадра
-        showCapturedPreview(canvas);
-
+        ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
         canvas.toBlob(function(blob) {
             if (!blob) {
                 showToast('Не удалось захватить изображение', 'danger');
@@ -492,10 +476,9 @@ function captureAndScan() {
                 }
                 return;
             }
-            console.log('Blob создан, размер:', blob.size);
             const file = new File([blob], 'scan.jpg', { type: 'image/jpeg' });
             processImageFile(file);
-        }, 'image/jpeg', 0.95);
+        }, 'image/jpeg', 0.9);
     } catch (e) {
         console.error('Ошибка захвата кадра:', e);
         showToast('Ошибка захвата: ' + e.message, 'danger');
@@ -506,101 +489,38 @@ function captureAndScan() {
     }
 }
 
-function showCapturedPreview(canvas) {
-    // Создаём или обновляем элемент превью
-    let previewContainer = document.getElementById('capturedPreview');
-    if (!previewContainer) {
-        previewContainer = document.createElement('div');
-        previewContainer.id = 'capturedPreview';
-        previewContainer.style.position = 'absolute';
-        previewContainer.style.top = '10px';
-        previewContainer.style.right = '10px';
-        previewContainer.style.width = '120px';
-        previewContainer.style.height = 'auto';
-        previewContainer.style.border = '2px solid white';
-        previewContainer.style.borderRadius = '8px';
-        previewContainer.style.overflow = 'hidden';
-        previewContainer.style.zIndex = '20';
-        previewContainer.style.boxShadow = '0 4px 12px rgba(0,0,0,0.5)';
-        const readerContainer = document.getElementById('reader');
-        if (readerContainer) {
-            readerContainer.style.position = 'relative';
-            readerContainer.appendChild(previewContainer);
-        }
-    }
-    // Очищаем и добавляем новое изображение
-    previewContainer.innerHTML = '';
-    const img = document.createElement('img');
-    img.src = canvas.toDataURL('image/jpeg', 0.8);
-    img.style.width = '100%';
-    img.style.height = 'auto';
-    img.style.display = 'block';
-    previewContainer.appendChild(img);
-    // Автоматически скрываем через 5 секунд
-    clearTimeout(previewContainer._hideTimer);
-    previewContainer._hideTimer = setTimeout(() => {
-        if (previewContainer) {
-            previewContainer.style.display = 'none';
-        }
-    }, 5000);
-}
-
 function processImageFile(file) {
     if (isProcessingImage) return;
     isProcessingImage = true;
     showToast('Распознавание...', 'info');
 
-    if (!file || file.size === 0) {
-        showToast('Пустой файл', 'danger');
-        isProcessingImage = false;
-        if (document.getElementById('scanner').classList.contains('active')) {
-            initScanner();
-        }
-        return;
-    }
-
-    console.log('Файл для распознавания:', file.name, file.size);
-
-    // Упрощённый конфиг для scanFile (без fps и qrbox)
-    const config = {
-        experimentalFeatures: {
-            useBarCodeDetectorIfSupported: true
-        }
-    };
-
     if (typeof Html5Qrcode.scanFile === 'function') {
-        // ИСПОЛЬЗУЕМ PROMISE (правильный синтаксис для версии 2.3.8)
+        const config = {
+            fps: 10,
+            qrbox: { width: 600, height: 400 },
+            experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+        };
         Html5Qrcode.scanFile(file, config)
             .then(decodedText => {
-                console.log('Распознано с фото (Promise):', decodedText);
                 isProcessingImage = false;
-                // Убираем превью
-                const preview = document.getElementById('capturedPreview');
-                if (preview) preview.style.display = 'none';
-                // Передаём результат в стандартный обработчик (второй аргумент undefined)
-                onScanSuccess(decodedText, undefined);
-                // Перезапускаем сканер, если активен экран
-                setTimeout(() => {
-                    if (document.getElementById('scanner').classList.contains('active')) {
-                        initScanner();
-                    }
-                }, 600);
+                // Обрабатываем результат так же, как при обычном сканировании
+                onScanSuccess(decodedText);
+                // После обработки перезапускаем сканер, если экран сканера активен
+                if (document.getElementById('scanner').classList.contains('active')) {
+                    setTimeout(() => initScanner(), 500);
+                }
             })
-            .catch(error => {
-                console.error('Ошибка распознавания с фото (Promise):', error);
+            .catch(err => {
+                console.error('Ошибка распознавания с фото:', err);
                 showToast('Не удалось распознать штрих-код на фото', 'warning');
                 isProcessingImage = false;
-                const preview = document.getElementById('capturedPreview');
-                if (preview) preview.style.display = 'none';
                 if (document.getElementById('scanner').classList.contains('active')) {
                     initScanner();
                 }
             });
     } else {
-        showToast('Функция распознавания фото не поддерживается', 'danger');
+        showToast('Функция scanFile не поддерживается в этой версии библиотеки', 'danger');
         isProcessingImage = false;
-        const preview = document.getElementById('capturedPreview');
-        if (preview) preview.style.display = 'none';
         if (document.getElementById('scanner').classList.contains('active')) {
             initScanner();
         }
@@ -620,7 +540,7 @@ function handleFileUpload(file) {
 }
 
 // ============================
-// 8. ОБРАБОТЧИКИ DOM
+// 8. ОБРАБОТЧИКИ DOM (ДОБАВЛЕНЫ НОВЫЕ)
 // ============================
 document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('confirmScanOkBtn')?.addEventListener('click', function() {
@@ -664,7 +584,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Кнопки для фото
+    // ===== НОВЫЕ ОБРАБОТЧИКИ ДЛЯ ФОТО =====
     document.getElementById('capturePhotoBtn')?.addEventListener('click', captureAndScan);
     document.getElementById('uploadPhotoBtn')?.addEventListener('click', function() {
         document.getElementById('fileInput')?.click();
