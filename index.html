@@ -2,7 +2,7 @@
 <html lang="ru" data-theme="light">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Инвентаризация</title>
     <script>
         (function() {
@@ -21,6 +21,129 @@
     <link rel="stylesheet" href="styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+
+    <style>
+        /* ===== АЛЬБОМНАЯ ОРИЕНТАЦИЯ ДЛЯ СКАНЕРА ===== */
+        @media (orientation: landscape) {
+            .app-container {
+                max-width: 100% !important;
+                border-radius: 0 !important;
+                min-height: 100vh !important;
+                padding-bottom: 0 !important;
+            }
+            #reader {
+                max-height: 85vh !important;
+                min-height: 85vh !important;
+                width: 100% !important;
+            }
+            .scanner-container {
+                min-height: 100vh !important;
+                border-radius: 0 !important;
+            }
+            .scanner-header {
+                background: rgba(0,0,0,0.6) !important;
+                position: absolute !important;
+                top: 0 !important;
+                left: 0 !important;
+                right: 0 !important;
+                z-index: 10 !important;
+                padding: 8px 12px !important;
+            }
+            .manual-input {
+                position: fixed !important;
+                bottom: 20px !important;
+                left: 20px !important;
+                right: 20px !important;
+                background: rgba(255,255,255,0.92) !important;
+                backdrop-filter: blur(10px) !important;
+                -webkit-backdrop-filter: blur(10px) !important;
+                border-radius: 20px !important;
+                padding: 12px 16px !important;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.3) !important;
+                border: 1px solid rgba(255,255,255,0.2) !important;
+                z-index: 20 !important;
+            }
+            .manual-input .input-group {
+                max-width: 90% !important;
+                margin: 0 auto !important;
+            }
+            /* Скрываем нижнюю навигацию в альбомной ориентации */
+            .liquid-nav {
+                display: none !important;
+            }
+            /* Увеличиваем область видео */
+            #reader video {
+                object-fit: cover !important;
+                height: 100% !important;
+            }
+        }
+
+        /* ===== ПОРТРЕТНАЯ ОРИЕНТАЦИЯ (по умолчанию) ===== */
+        @media (orientation: portrait) {
+            .liquid-nav {
+                display: flex !important;
+            }
+        }
+
+        /* ===== АДАПТИВ ДЛЯ ПЛАНШЕТОВ И КОМПЬЮТЕРОВ ===== */
+        @media (min-width: 768px) and (orientation: landscape) {
+            #reader {
+                max-height: 90vh !important;
+                min-height: 90vh !important;
+            }
+            .manual-input {
+                max-width: 600px !important;
+                left: 50% !important;
+                transform: translateX(-50%) !important;
+                bottom: 30px !important;
+            }
+        }
+
+        /* Тёмная тема для альбомной ориентации */
+        [data-theme="dark"] @media (orientation: landscape) {
+            .manual-input {
+                background: rgba(30,30,40,0.92) !important;
+                border-color: rgba(255,255,255,0.1) !important;
+            }
+            .manual-input input {
+                background: rgba(255,255,255,0.1) !important;
+                color: #e0e0e0 !important;
+                border-color: rgba(255,255,255,0.15) !important;
+            }
+            .manual-input input::placeholder {
+                color: #888 !important;
+            }
+        }
+
+        /* Дополнительные улучшения для сканера */
+        #reader {
+            background: #000 !important;
+        }
+        .scanner-container {
+            position: relative !important;
+            background: #000 !important;
+        }
+        .scanner-header .btn-outline-light:hover {
+            background: rgba(255,255,255,0.2) !important;
+        }
+        /* Анимация сканирования (опционально) */
+        #reader::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #00f2fe, transparent);
+            animation: scanLine 2s linear infinite;
+            opacity: 0.5;
+        }
+        @keyframes scanLine {
+            0% { transform: translateY(0%); }
+            50% { transform: translateY(100%); }
+            100% { transform: translateY(0%); }
+        }
+    </style>
 </head>
 <body>
 
@@ -117,7 +240,7 @@
                         <i class="bi bi-arrow-left"></i> Назад
                     </button>
                 </div>
-                <div id="reader" style="width:100%;"></div>
+                <div id="reader" style="width:100%; min-height:60vh; background:#000;"></div>
                 <div class="manual-input p-3 bg-white">
                     <div class="input-group">
                         <input type="text" id="manualInvInput" class="form-control" placeholder="Введите инв. номер">
@@ -418,7 +541,7 @@
         </div>
     </div>
 
-    <!-- НОВАЯ МОДАЛКА ПОДТВЕРЖДЕНИЯ СКАНИРОВАНИЯ -->
+    <!-- МОДАЛКА ПОДТВЕРЖДЕНИЯ СКАНИРОВАНИЯ -->
     <div class="modal fade" id="confirmScanModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">

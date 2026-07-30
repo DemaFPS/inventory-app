@@ -1,7 +1,7 @@
 /**
  * app.js – Полная версия с подтверждением сканирования, отдельным листом History,
- * автоопределением форматов, увеличенной областью сканирования и экспериментальным детектором.
- * ОПТИМИЗИРОВАНА ДЛЯ ДЛИННЫХ ШТРИХ-КОДОВ.
+ * автоопределением форматов, увеличенной областью сканирования, экспериментальным детектором
+ * и ПОДДЕРЖКОЙ ПЕРЕВОРОТА ЭКРАНА для сканирования длинных штрих-кодов.
  */
 
 // ============================
@@ -335,7 +335,7 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 6. СКАНЕР (ОПТИМИЗИРОВАН ДЛЯ ДЛИННЫХ ШТРИХ-КОДОВ)
+// 6. СКАНЕР (С ПОДДЕРЖКОЙ ПЕРЕВОРОТА ЭКРАНА)
 // ============================
 async function initScanner() {
     if (isInitializingScanner) return;
@@ -355,18 +355,27 @@ async function initScanner() {
         readerElement.innerHTML = '';
         scannerInstance = new Html5Qrcode("reader");
 
+        // Определяем размеры с учётом ориентации
         const containerWidth = readerElement.offsetWidth || 400;
+        const isLandscape = window.innerWidth > window.innerHeight;
+
+        // В альбомной ориентации делаем область шире
+        const qrboxWidth = isLandscape 
+            ? Math.min(containerWidth - 20, 800)  // в ландшафте до 800px
+            : Math.min(containerWidth - 20, 500); // в портрете до 500px
+
         const config = {
             fps: 20,
-            // Ключевое изменение: делаем область шире и ниже
             qrbox: {
-                width: Math.min(containerWidth - 20, 650),
-                height: 250
+                width: qrboxWidth,
+                height: isLandscape ? 200 : 280  // в ландшафте ниже
             },
             experimentalFeatures: {
                 useBarCodeDetectorIfSupported: true
             }
         };
+
+        console.log('Сканер инициализирован с размерами:', config.qrbox, 'Ориентация:', isLandscape ? 'альбомная' : 'портретная');
 
         await scannerInstance.start(
             { facingMode: "environment" },
@@ -376,7 +385,7 @@ async function initScanner() {
         );
         isScanning = true;
         isInitializingScanner = false;
-        console.log('Сканер запущен с оптимизацией для длинных кодов');
+        console.log('Сканер запущен с поддержкой переворота экрана');
     } catch (err) {
         console.error('Ошибка запуска сканера:', err);
         showToast('Не удалось получить доступ к камере: ' + err.message, 'danger');
@@ -454,6 +463,29 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('confirmScanInput')?.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') {
             document.getElementById('confirmScanOkBtn').click();
+        }
+    });
+
+    // Перезапуск сканера при изменении ориентации экрана
+    window.addEventListener('resize', function() {
+        if (document.getElementById('scanner').classList.contains('active')) {
+            // Если сканер активен, перезапускаем его с новыми размерами
+            stopScanner();
+            setTimeout(() => {
+                initScanner();
+            }, 300);
+        }
+    });
+
+    // Слушаем событие изменения ориентации (более надёжно для мобильных)
+    window.addEventListener('orientationchange', function() {
+        if (document.getElementById('scanner').classList.contains('active')) {
+            setTimeout(() => {
+                stopScanner();
+                setTimeout(() => {
+                    initScanner();
+                }, 300);
+            }, 400);
         }
     });
 });
