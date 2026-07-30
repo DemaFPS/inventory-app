@@ -109,17 +109,22 @@
             </div>
         </div>
 
-        <!-- ЭКРАН 2: СКАНЕР (с добавленной кнопкой переключения режима) -->
+        <!-- ЭКРАН 2: СКАНЕР (с кнопками для фото) -->
         <div id="scanner" class="screen">
             <div class="scanner-container">
                 <div class="scanner-header p-2 d-flex justify-content-between align-items-center">
                     <button id="backFromScanner" class="btn btn-outline-light btn-sm">
                         <i class="bi bi-arrow-left"></i> Назад
                     </button>
-                    <!-- НОВАЯ КНОПКА ПЕРЕКЛЮЧЕНИЯ РЕЖИМА -->
-                    <button id="toggleLongBarcode" class="btn btn-outline-secondary btn-sm">
-                        🔳 Длинный
-                    </button>
+                    <div>
+                        <button id="capturePhotoBtn" class="btn btn-primary btn-sm me-1" title="Сделать снимок">
+                            <i class="bi bi-camera"></i>
+                        </button>
+                        <button id="uploadPhotoBtn" class="btn btn-secondary btn-sm" title="Загрузить фото">
+                            <i class="bi bi-image"></i>
+                        </button>
+                        <input type="file" id="fileInput" accept="image/*" style="display:none;">
+                    </div>
                 </div>
                 <div id="reader" style="width:100%;"></div>
                 <div class="manual-input p-3 bg-white">

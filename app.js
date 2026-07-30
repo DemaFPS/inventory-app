@@ -1,6 +1,8 @@
 /**
- * app.js – Улучшенная версия с расширенной поддержкой длинных штрих-кодов,
- * автоматической адаптацией под ориентацию и ручным режимом «Длинный штрих-код».
+ * app.js – Полная версия с подтверждением сканирования, отдельным листом History,
+ * автоопределением форматов, увеличенной областью сканирования, экспериментальным детектором,
+ * поддержкой переворота экрана для сканирования длинных штрих-кодов
+ * и ДОБАВЛЕННЫМ распознаванием с фотографии (снимок камеры / загрузка файла).
  */
 
 // ============================
@@ -37,7 +39,7 @@ let currentUser = null;
 let localUserName = localStorage.getItem('localUserName') || 'Аноним';
 let isCreating = false;
 let pendingScanText = '';
-let longBarcodeMode = false; // Флаг для увеличенной области сканирования
+let isProcessingImage = false; // флаг для обработки фото
 
 // ============================
 // 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -63,7 +65,7 @@ function normalizeInventoryNumber(str) {
 function validateInventoryNumber(str) {
     if (str === undefined || str === null) return false;
     const original = String(str).trim();
-    if (original.length < 6 || original.length > 50) return false; // увеличено до 50
+    if (original.length < 6 || original.length > 20) return false;
     const regex = /^[A-Za-zА-Яа-я0-9]+(?:-[A-Za-zА-Яа-я0-9]+)?$/;
     if (!regex.test(original)) return false;
     return true;
@@ -335,7 +337,7 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 6. СКАНЕР (С ПОДДЕРЖКОЙ ПЕРЕВОРОТА И ДЛИННЫХ ШТРИХ-КОДОВ) - ИСПРАВЛЕНА ОШИБКА
+// 6. СКАНЕР (С ПОДДЕРЖКОЙ ПЕРЕВОРОТА ЭКРАНА)
 // ============================
 async function initScanner() {
     if (isInitializingScanner) return;
@@ -348,8 +350,6 @@ async function initScanner() {
         }
         const readerElement = document.getElementById('reader');
         if (!readerElement) throw new Error('Элемент #reader не найден');
-
-        // Остановить предыдущий экземпляр
         if (scannerInstance) {
             try { await scannerInstance.stop(); await scannerInstance.clear(); } catch(e) {}
             scannerInstance = null;
@@ -357,64 +357,34 @@ async function initScanner() {
         readerElement.innerHTML = '';
         scannerInstance = new Html5Qrcode("reader");
 
-        // Определяем размеры контейнера с учётом ориентации
-        const containerWidth = readerElement.offsetWidth || window.innerWidth - 32;
-        const containerHeight = readerElement.offsetHeight || window.innerHeight - 200;
+        const containerWidth = readerElement.offsetWidth || 400;
         const isLandscape = window.innerWidth > window.innerHeight;
-
-        // Базовые размеры области сканирования (в процентах от контейнера)
-        let qrboxWidth, qrboxHeight;
-        if (longBarcodeMode) {
-            // В режиме длинного штрих-кода – максимально возможная область
-            qrboxWidth = Math.min(containerWidth * 0.95, 800);
-            qrboxHeight = isLandscape ? 200 : 280;
-        } else {
-            // Обычный режим: ширина до 90%, высота адаптивная
-            qrboxWidth = isLandscape 
-                ? Math.min(containerWidth * 0.90, 900) 
-                : Math.min(containerWidth * 0.85, 600);
-            qrboxHeight = isLandscape ? 220 : 300;
-        }
-
-        // ✅ ИСПРАВЛЕНО: передаём только { facingMode: "environment" }
-        const cameraConfig = { facingMode: "environment" };
+        const qrboxWidth = isLandscape 
+            ? Math.min(containerWidth - 20, 800)
+            : Math.min(containerWidth - 20, 500);
 
         const config = {
-            fps: longBarcodeMode ? 12 : 20,
+            fps: 20,
             qrbox: {
                 width: qrboxWidth,
-                height: qrboxHeight
+                height: isLandscape ? 200 : 280
             },
             experimentalFeatures: {
                 useBarCodeDetectorIfSupported: true
-            },
-            formatsToSupport: [
-                Html5QrcodeSupportedFormats.CODE_128,
-                Html5QrcodeSupportedFormats.CODE_39,
-                Html5QrcodeSupportedFormats.CODE_93,
-                Html5QrcodeSupportedFormats.CODABAR,
-                Html5QrcodeSupportedFormats.EAN_13,
-                Html5QrcodeSupportedFormats.EAN_8,
-                Html5QrcodeSupportedFormats.UPC_A,
-                Html5QrcodeSupportedFormats.UPC_E,
-                Html5QrcodeSupportedFormats.QR_CODE,
-                Html5QrcodeSupportedFormats.DATA_MATRIX,
-                Html5QrcodeSupportedFormats.AZTEC,
-                Html5QrcodeSupportedFormats.PDF_417
-            ]
+            }
         };
 
-        console.log('Сканер инициализирован с размерами:', config.qrbox, 'Ориентация:', isLandscape ? 'альбомная' : 'портретная', 'Режим:', longBarcodeMode ? 'длинный штрих-код' : 'обычный');
+        console.log('Сканер инициализирован с размерами:', config.qrbox, 'Ориентация:', isLandscape ? 'альбомная' : 'портретная');
 
         await scannerInstance.start(
-            cameraConfig,   // ✅ теперь объект только с одним ключом
+            { facingMode: "environment" },
             config,
             onScanSuccess,
             onScanError
         );
         isScanning = true;
         isInitializingScanner = false;
-        console.log('Сканер запущен успешно');
+        console.log('Сканер запущен с поддержкой переворота экрана');
     } catch (err) {
         console.error('Ошибка запуска сканера:', err);
         showToast('Не удалось получить доступ к камере: ' + err.message, 'danger');
@@ -473,6 +443,105 @@ async function onScanSuccess(decodedText, decodedResult) {
 
 function onScanError(err) { /* игнорируем */ }
 
+// ============================
+// 7.1 РАСПОЗНАВАНИЕ С ФОТОГРАФИИ (ДОБАВЛЕНО)
+// ============================
+function captureAndScan() {
+    if (isProcessingImage) return;
+    const videoElement = document.querySelector('#reader video');
+    if (!videoElement) {
+        showToast('Камера не активна', 'warning');
+        return;
+    }
+
+    if (scannerInstance && isScanning) {
+        stopScanner();
+    }
+
+    isProcessingImage = true;
+    showToast('Захват кадра...', 'info');
+
+    try {
+        const canvas = document.createElement('canvas');
+        canvas.width = videoElement.videoWidth || 1280;
+        canvas.height = videoElement.videoHeight || 720;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(function(blob) {
+            if (!blob) {
+                showToast('Не удалось захватить изображение', 'danger');
+                isProcessingImage = false;
+                if (document.getElementById('scanner').classList.contains('active')) {
+                    initScanner();
+                }
+                return;
+            }
+            const file = new File([blob], 'scan.jpg', { type: 'image/jpeg' });
+            processImageFile(file);
+        }, 'image/jpeg', 0.9);
+    } catch (e) {
+        console.error('Ошибка захвата кадра:', e);
+        showToast('Ошибка захвата: ' + e.message, 'danger');
+        isProcessingImage = false;
+        if (document.getElementById('scanner').classList.contains('active')) {
+            initScanner();
+        }
+    }
+}
+
+function processImageFile(file) {
+    if (isProcessingImage) return;
+    isProcessingImage = true;
+    showToast('Распознавание...', 'info');
+
+    if (typeof Html5Qrcode.scanFile === 'function') {
+        const config = {
+            fps: 10,
+            qrbox: { width: 600, height: 400 },
+            experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+        };
+        Html5Qrcode.scanFile(file, config)
+            .then(decodedText => {
+                isProcessingImage = false;
+                // Обрабатываем результат так же, как при обычном сканировании
+                onScanSuccess(decodedText);
+                // После обработки перезапускаем сканер, если экран сканера активен
+                if (document.getElementById('scanner').classList.contains('active')) {
+                    setTimeout(() => initScanner(), 500);
+                }
+            })
+            .catch(err => {
+                console.error('Ошибка распознавания с фото:', err);
+                showToast('Не удалось распознать штрих-код на фото', 'warning');
+                isProcessingImage = false;
+                if (document.getElementById('scanner').classList.contains('active')) {
+                    initScanner();
+                }
+            });
+    } else {
+        showToast('Функция scanFile не поддерживается в этой версии библиотеки', 'danger');
+        isProcessingImage = false;
+        if (document.getElementById('scanner').classList.contains('active')) {
+            initScanner();
+        }
+    }
+}
+
+function handleFileUpload(file) {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+        showToast('Пожалуйста, выберите изображение', 'warning');
+        return;
+    }
+    if (scannerInstance && isScanning) {
+        stopScanner();
+    }
+    processImageFile(file);
+}
+
+// ============================
+// 8. ОБРАБОТЧИКИ DOM (ДОБАВЛЕНЫ НОВЫЕ)
+// ============================
 document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('confirmScanOkBtn')?.addEventListener('click', function() {
         const input = document.getElementById('confirmScanInput');
@@ -495,15 +564,12 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Перезапуск сканера при изменении ориентации (с защитой от множественных вызовов)
-    let resizeTimeout = null;
     window.addEventListener('resize', function() {
         if (document.getElementById('scanner').classList.contains('active')) {
-            clearTimeout(resizeTimeout);
-            resizeTimeout = setTimeout(() => {
-                stopScanner();
-                setTimeout(() => initScanner(), 300);
-            }, 400);
+            stopScanner();
+            setTimeout(() => {
+                initScanner();
+            }, 300);
         }
     });
 
@@ -511,28 +577,29 @@ document.addEventListener('DOMContentLoaded', function() {
         if (document.getElementById('scanner').classList.contains('active')) {
             setTimeout(() => {
                 stopScanner();
-                setTimeout(() => initScanner(), 400);
-            }, 500);
+                setTimeout(() => {
+                    initScanner();
+                }, 300);
+            }, 400);
         }
     });
 
-    // Кнопка переключения режима длинного штрих-кода (ДОБАВЬТЕ ЕЁ В HTML)
-    const toggleLongBarcodeBtn = document.getElementById('toggleLongBarcode');
-    if (toggleLongBarcodeBtn) {
-        toggleLongBarcodeBtn.addEventListener('click', function() {
-            longBarcodeMode = !longBarcodeMode;
-            this.textContent = longBarcodeMode ? '🔲 Обычный' : '🔳 Длинный';
-            this.classList.toggle('btn-warning', longBarcodeMode);
-            this.classList.toggle('btn-outline-secondary', !longBarcodeMode);
-            if (document.getElementById('scanner').classList.contains('active')) {
-                stopScanner();
-                setTimeout(() => initScanner(), 300);
-            }
-            showToast(longBarcodeMode ? 'Включен режим длинного штрих-кода' : 'Обычный режим', 'info');
-        });
-    }
+    // ===== НОВЫЕ ОБРАБОТЧИКИ ДЛЯ ФОТО =====
+    document.getElementById('capturePhotoBtn')?.addEventListener('click', captureAndScan);
+    document.getElementById('uploadPhotoBtn')?.addEventListener('click', function() {
+        document.getElementById('fileInput')?.click();
+    });
+    document.getElementById('fileInput')?.addEventListener('change', function(e) {
+        if (this.files && this.files.length > 0) {
+            handleFileUpload(this.files[0]);
+            this.value = '';
+        }
+    });
 });
 
+// ============================
+// 9. ОБРАБОТКА РЕЗУЛЬТАТА СКАНИРОВАНИЯ (ПРОДОЛЖЕНИЕ)
+// ============================
 async function processScannedBarcode(rawText) {
     const normalized = normalizeInventoryNumber(rawText);
     console.log('Поиск устройства по номеру:', normalized);
@@ -589,14 +656,14 @@ async function handleManualFind() {
         return;
     }
     if (!validateInventoryNumber(rawValue)) {
-        showToast('Неверный формат номера (длина 6-50 символов, только буквы/цифры/дефис)', 'danger');
+        showToast('Неверный формат номера (длина 6-20 символов, только буквы/цифры/дефис)', 'danger');
         return;
     }
     await processScannedBarcode(rawValue);
 }
 
 // ============================
-// 8. КАРТОЧКА УСТРОЙСТВА + ИСТОРИЯ
+// 10. КАРТОЧКА УСТРОЙСТВА + ИСТОРИЯ
 // ============================
 async function loadDeviceHistory(inventoryNumber) {
     try {
@@ -651,7 +718,7 @@ async function renderDeviceCard(device) {
 }
 
 // ============================
-// 9. ОБРАБОТЧИКИ ДЕЙСТВИЙ
+// 11. ОБРАБОТЧИКИ ДЕЙСТВИЙ
 // ============================
 async function performDeviceAction(action, data = {}) {
     if (!currentDevice) {
@@ -775,7 +842,7 @@ function removePendingAction(inventoryNumber) {
 }
 
 // ============================
-// 10. ОБОРОТНАЯ ВЕДОМОСТЬ
+// 12. ОБОРОТНАЯ ВЕДОМОСТЬ
 // ============================
 async function loadCabinetSelect() {
     const select = document.getElementById('cabinetSelect');
@@ -841,7 +908,7 @@ function renderChecklist(cabinetName) {
 }
 
 // ============================
-// 11. ОФЛАЙН-РЕЖИМ
+// 13. ОФЛАЙН-РЕЖИМ
 // ============================
 function savePendingScan(inventoryNumber, type = 'barcode') {
     let pending = JSON.parse(localStorage.getItem('pendingScans') || '[]');
@@ -956,7 +1023,7 @@ async function syncPendingData() {
 }
 
 // ============================
-// 12. ЛОГИ
+// 14. ЛОГИ
 // ============================
 function renderLogs() {
     const container = document.getElementById('logsList');
@@ -1029,7 +1096,7 @@ window.createFromLog = function(inventoryNumber) {
 };
 
 // ============================
-// 13. МОДАЛКА СОЗДАНИЯ
+// 15. МОДАЛКА СОЗДАНИЯ
 // ============================
 function showCreateDeviceModal(inventoryNumber) {
     document.getElementById('createInventoryNumber').value = inventoryNumber;
@@ -1056,7 +1123,7 @@ async function confirmCreateDevice() {
     const warranty = document.getElementById('createWarranty').value.trim();
 
     if (!inv || !validateInventoryNumber(inv)) {
-        showToast('Неверный инвентарный номер (длина 6-50 символов)', 'danger');
+        showToast('Неверный инвентарный номер (длина 6-20 символов)', 'danger');
         return;
     }
     if (warranty && !/^\d{2}\.\d{2}\.\d{4}$/.test(warranty)) {
@@ -1132,7 +1199,7 @@ async function confirmCreateDevice() {
 }
 
 // ============================
-// 14. ОТЧЁТ
+// 16. ОТЧЁТ
 // ============================
 function generateCSV(data) {
     if (!data || !Array.isArray(data) || data.length === 0) return '';
@@ -1218,7 +1285,7 @@ function printReport() {
 }
 
 // ============================
-// 15. НАВИГАЦИЯ
+// 17. НАВИГАЦИЯ
 // ============================
 let navButtons = [];
 let activePill = null;
@@ -1237,7 +1304,7 @@ function updateActivePill(smooth = true) {
 }
 
 // ============================
-// 16. ИНИЦИАЛИЗАЦИЯ
+// 18. ИНИЦИАЛИЗАЦИЯ
 // ============================
 document.addEventListener('DOMContentLoaded', async function() {
     const forceHideLoading = setTimeout(() => {
