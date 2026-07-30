@@ -1,7 +1,6 @@
 /**
- * app.js – Полная версия с подтверждением сканирования, отдельным листом History,
- * автоопределением форматов, увеличенной областью сканирования, экспериментальным детектором
- * и ПОДДЕРЖКОЙ ПЕРЕВОРОТА ЭКРАНА для сканирования длинных штрих-кодов.
+ * app.js – Улучшенная версия с расширенной поддержкой длинных штрих-кодов,
+ * автоматической адаптацией под ориентацию и ручным режимом «Длинный штрих-код».
  */
 
 // ============================
@@ -38,6 +37,7 @@ let currentUser = null;
 let localUserName = localStorage.getItem('localUserName') || 'Аноним';
 let isCreating = false;
 let pendingScanText = '';
+let longBarcodeMode = false; // Флаг для увеличенной области сканирования
 
 // ============================
 // 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -63,7 +63,7 @@ function normalizeInventoryNumber(str) {
 function validateInventoryNumber(str) {
     if (str === undefined || str === null) return false;
     const original = String(str).trim();
-    if (original.length < 6 || original.length > 20) return false;
+    if (original.length < 6 || original.length > 50) return false; // увеличено до 50
     const regex = /^[A-Za-zА-Яа-я0-9]+(?:-[A-Za-zА-Яа-я0-9]+)?$/;
     if (!regex.test(original)) return false;
     return true;
@@ -335,7 +335,7 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 6. СКАНЕР (С ПОДДЕРЖКОЙ ПЕРЕВОРОТА ЭКРАНА)
+// 6. СКАНЕР (С ПОДДЕРЖКОЙ ПЕРЕВОРОТА И ДЛИННЫХ ШТРИХ-КОДОВ)
 // ============================
 async function initScanner() {
     if (isInitializingScanner) return;
@@ -348,6 +348,8 @@ async function initScanner() {
         }
         const readerElement = document.getElementById('reader');
         if (!readerElement) throw new Error('Элемент #reader не найден');
+        
+        // Остановить предыдущий экземпляр
         if (scannerInstance) {
             try { await scannerInstance.stop(); await scannerInstance.clear(); } catch(e) {}
             scannerInstance = null;
@@ -355,37 +357,69 @@ async function initScanner() {
         readerElement.innerHTML = '';
         scannerInstance = new Html5Qrcode("reader");
 
-        // Определяем размеры с учётом ориентации
-        const containerWidth = readerElement.offsetWidth || 400;
+        // Определяем размеры контейнера с учётом ориентации
+        const containerWidth = readerElement.offsetWidth || window.innerWidth - 32;
+        const containerHeight = readerElement.offsetHeight || window.innerHeight - 200;
         const isLandscape = window.innerWidth > window.innerHeight;
 
-        // В альбомной ориентации делаем область шире
-        const qrboxWidth = isLandscape 
-            ? Math.min(containerWidth - 20, 800)  // в ландшафте до 800px
-            : Math.min(containerWidth - 20, 500); // в портрете до 500px
+        // Базовые размеры области сканирования (в процентах от контейнера)
+        let qrboxWidth, qrboxHeight;
+        if (longBarcodeMode) {
+            // В режиме длинного штрих-кода – максимально возможная область
+            qrboxWidth = Math.min(containerWidth * 0.95, 800);
+            qrboxHeight = isLandscape ? 200 : 280;
+        } else {
+            // Обычный режим: ширина до 90%, высота адаптивная
+            qrboxWidth = isLandscape 
+                ? Math.min(containerWidth * 0.90, 900) 
+                : Math.min(containerWidth * 0.85, 600);
+            qrboxHeight = isLandscape ? 220 : 300;
+        }
+
+        // Запрос высокого разрешения камеры
+        const constraints = {
+            facingMode: "environment",
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
+        };
 
         const config = {
-            fps: 20,
+            fps: longBarcodeMode ? 12 : 20, // при длинных кодах меньше FPS для лучшего качества
             qrbox: {
                 width: qrboxWidth,
-                height: isLandscape ? 200 : 280  // в ландшафте ниже
+                height: qrboxHeight
             },
             experimentalFeatures: {
                 useBarCodeDetectorIfSupported: true
-            }
+            },
+            // Добавляем поддержку более широкого спектра форматов (необязательно)
+            formatsToSupport: [
+                Html5QrcodeSupportedFormats.CODE_128,
+                Html5QrcodeSupportedFormats.CODE_39,
+                Html5QrcodeSupportedFormats.CODE_93,
+                Html5QrcodeSupportedFormats.CODABAR,
+                Html5QrcodeSupportedFormats.EAN_13,
+                Html5QrcodeSupportedFormats.EAN_8,
+                Html5QrcodeSupportedFormats.UPC_A,
+                Html5QrcodeSupportedFormats.UPC_E,
+                Html5QrcodeSupportedFormats.QR_CODE,
+                Html5QrcodeSupportedFormats.DATA_MATRIX,
+                Html5QrcodeSupportedFormats.AZTEC,
+                Html5QrcodeSupportedFormats.PDF_417
+            ]
         };
 
-        console.log('Сканер инициализирован с размерами:', config.qrbox, 'Ориентация:', isLandscape ? 'альбомная' : 'портретная');
+        console.log('Сканер инициализирован с размерами:', config.qrbox, 'Ориентация:', isLandscape ? 'альбомная' : 'портретная', 'Режим:', longBarcodeMode ? 'длинный штрих-код' : 'обычный');
 
         await scannerInstance.start(
-            { facingMode: "environment" },
+            constraints,
             config,
             onScanSuccess,
             onScanError
         );
         isScanning = true;
         isInitializingScanner = false;
-        console.log('Сканер запущен с поддержкой переворота экрана');
+        console.log('Сканер запущен успешно');
     } catch (err) {
         console.error('Ошибка запуска сканера:', err);
         showToast('Не удалось получить доступ к камере: ' + err.message, 'danger');
@@ -466,28 +500,42 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Перезапуск сканера при изменении ориентации экрана
+    // Перезапуск сканера при изменении ориентации (с защитой от множественных вызовов)
+    let resizeTimeout = null;
     window.addEventListener('resize', function() {
         if (document.getElementById('scanner').classList.contains('active')) {
-            // Если сканер активен, перезапускаем его с новыми размерами
-            stopScanner();
-            setTimeout(() => {
-                initScanner();
-            }, 300);
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(() => {
+                stopScanner();
+                setTimeout(() => initScanner(), 300);
+            }, 400);
         }
     });
 
-    // Слушаем событие изменения ориентации (более надёжно для мобильных)
     window.addEventListener('orientationchange', function() {
         if (document.getElementById('scanner').classList.contains('active')) {
             setTimeout(() => {
                 stopScanner();
-                setTimeout(() => {
-                    initScanner();
-                }, 300);
-            }, 400);
+                setTimeout(() => initScanner(), 400);
+            }, 500);
         }
     });
+
+    // Кнопка переключения режима длинного штрих-кода
+    const toggleLongBarcodeBtn = document.getElementById('toggleLongBarcode');
+    if (toggleLongBarcodeBtn) {
+        toggleLongBarcodeBtn.addEventListener('click', function() {
+            longBarcodeMode = !longBarcodeMode;
+            this.textContent = longBarcodeMode ? '🔲 Обычный' : '🔳 Длинный';
+            this.classList.toggle('btn-warning', longBarcodeMode);
+            this.classList.toggle('btn-outline-secondary', !longBarcodeMode);
+            if (document.getElementById('scanner').classList.contains('active')) {
+                stopScanner();
+                setTimeout(() => initScanner(), 300);
+            }
+            showToast(longBarcodeMode ? 'Включен режим длинного штрих-кода' : 'Обычный режим', 'info');
+        });
+    }
 });
 
 async function processScannedBarcode(rawText) {
@@ -546,7 +594,7 @@ async function handleManualFind() {
         return;
     }
     if (!validateInventoryNumber(rawValue)) {
-        showToast('Неверный формат номера (длина 6-20 символов, только буквы/цифры/дефис)', 'danger');
+        showToast('Неверный формат номера (длина 6-50 символов, только буквы/цифры/дефис)', 'danger');
         return;
     }
     await processScannedBarcode(rawValue);
@@ -1013,7 +1061,7 @@ async function confirmCreateDevice() {
     const warranty = document.getElementById('createWarranty').value.trim();
 
     if (!inv || !validateInventoryNumber(inv)) {
-        showToast('Неверный инвентарный номер (длина 6-20 символов)', 'danger');
+        showToast('Неверный инвентарный номер (длина 6-50 символов)', 'danger');
         return;
     }
     if (warranty && !/^\d{2}\.\d{2}\.\d{4}$/.test(warranty)) {
