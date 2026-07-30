@@ -1,6 +1,7 @@
 /**
  * app.js – Улучшенная версия с увеличенной областью сканирования,
  * поддержкой фото (снимок + загрузка) и превью захваченного кадра.
+ * ИСПРАВЛЕНА ОШИБКА scanFile (теперь используется Promise).
  */
 
 // ============================
@@ -444,7 +445,7 @@ async function onScanSuccess(decodedText, decodedResult) {
 function onScanError(err) { /* игнорируем */ }
 
 // ============================
-// 7.1 РАСПОЗНАВАНИЕ С ФОТОГРАФИИ (ИСПРАВЛЕННАЯ ВЕРСИЯ)
+// 7.1 РАСПОЗНАВАНИЕ С ФОТОГРАФИИ (ИСПРАВЛЕННАЯ ВЕРСИЯ - PROMISE)
 // ============================
 function captureAndScan() {
     if (isProcessingImage) return;
@@ -535,7 +536,7 @@ function showCapturedPreview(canvas) {
     img.style.height = 'auto';
     img.style.display = 'block';
     previewContainer.appendChild(img);
-    // Автоматически скрываем через 3 секунды
+    // Автоматически скрываем через 5 секунд
     clearTimeout(previewContainer._hideTimer);
     previewContainer._hideTimer = setTimeout(() => {
         if (previewContainer) {
@@ -560,37 +561,33 @@ function processImageFile(file) {
 
     console.log('Файл для распознавания:', file.name, file.size);
 
-    // Настройки для распознавания (увеличенная область)
+    // Упрощённый конфиг для scanFile (без fps и qrbox)
     const config = {
-        fps: 10,
-        qrbox: { width: 600, height: 400 },
         experimentalFeatures: {
             useBarCodeDetectorIfSupported: true
         }
     };
 
-    // Проверяем наличие метода scanFile
     if (typeof Html5Qrcode.scanFile === 'function') {
-        Html5Qrcode.scanFile(
-            file,
-            config,
-            function(decodedText, decodedResult) {
-                console.log('Распознано с фото:', decodedText);
+        // ИСПОЛЬЗУЕМ PROMISE (правильный синтаксис для версии 2.3.8)
+        Html5Qrcode.scanFile(file, config)
+            .then(decodedText => {
+                console.log('Распознано с фото (Promise):', decodedText);
                 isProcessingImage = false;
                 // Убираем превью
                 const preview = document.getElementById('capturedPreview');
                 if (preview) preview.style.display = 'none';
-                // Передаём результат в стандартный обработчик
-                onScanSuccess(decodedText, decodedResult);
+                // Передаём результат в стандартный обработчик (второй аргумент undefined)
+                onScanSuccess(decodedText, undefined);
                 // Перезапускаем сканер, если активен экран
                 setTimeout(() => {
                     if (document.getElementById('scanner').classList.contains('active')) {
                         initScanner();
                     }
                 }, 600);
-            },
-            function(errorMessage) {
-                console.error('Ошибка распознавания с фото:', errorMessage);
+            })
+            .catch(error => {
+                console.error('Ошибка распознавания с фото (Promise):', error);
                 showToast('Не удалось распознать штрих-код на фото', 'warning');
                 isProcessingImage = false;
                 const preview = document.getElementById('capturedPreview');
@@ -598,8 +595,7 @@ function processImageFile(file) {
                 if (document.getElementById('scanner').classList.contains('active')) {
                     initScanner();
                 }
-            }
-        );
+            });
     } else {
         showToast('Функция распознавания фото не поддерживается', 'danger');
         isProcessingImage = false;
