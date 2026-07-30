@@ -1,6 +1,6 @@
 /**
  * app.js – Полная версия с функцией ФОТОСЪЁМКИ для длинных штрих-кодов
- * Теперь можно сфотографировать код и распознать по фото.
+ * ИСПРАВЛЕНА КОНФИГУРАЦИЯ КАМЕРЫ и ОБРАБОТКА ОШИБОК ПРОКСИ
  */
 
 // ============================
@@ -336,7 +336,7 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 6. СКАНЕР С ФУНКЦИЕЙ ФОТОСЪЁМКИ
+// 6. СКАНЕР С ФУНКЦИЕЙ ФОТОСЪЁМКИ (ИСПРАВЛЕНА КОНФИГУРАЦИЯ)
 // ============================
 async function initScanner() {
     if (isInitializingScanner) return;
@@ -405,12 +405,9 @@ async function initScanner() {
 
         console.log('Сканер инициализирован с размерами:', config.qrbox);
 
+        // ИСПРАВЛЕНО: правильная конфигурация камеры
         await scannerInstance.start(
-            { 
-                facingMode: "environment",
-                width: { ideal: 1920 },
-                height: { ideal: 1080 }
-            },
+            { facingMode: "environment" },
             config,
             function(decodedText, decodedResult) {
                 if (decodedText && decodedText.length > 0) {
@@ -467,14 +464,6 @@ function takePhoto() {
         const videoWidth = videoElement.videoWidth || 640;
         const videoHeight = videoElement.videoHeight || 480;
         
-        const readerRect = document.getElementById('reader').getBoundingClientRect();
-        const scanArea = {
-            x: readerRect.width * 0.1,
-            y: readerRect.height * 0.15,
-            width: readerRect.width * 0.8,
-            height: readerRect.height * 0.7
-        };
-        
         canvas.width = videoWidth;
         canvas.height = videoHeight;
         
@@ -490,46 +479,20 @@ function takePhoto() {
 
 // ===== ПОКАЗ ПРЕВЬЮ ФОТО И РАСПОЗНАВАНИЕ =====
 function showPhotoPreview(canvas) {
-    const modalHtml = `
-        <div class="modal fade" id="photoPreviewModal" tabindex="-1" data-bs-backdrop="static">
-            <div class="modal-dialog modal-dialog-centered modal-lg">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title">📷 Фото штрих-кода</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body text-center">
-                        <img id="photoPreviewImage" src="${canvas.toDataURL('image/jpeg', 0.95)}" class="img-fluid rounded" style="max-height: 60vh;">
-                        <div class="mt-3">
-                            <div class="spinner-border text-primary" id="photoScanningSpinner" role="status">
-                                <span class="visually-hidden">Распознавание...</span>
-                            </div>
-                            <p id="photoScanStatus" class="mt-2">Распознавание...</p>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
-                        <button type="button" class="btn btn-primary" id="photoRetakeBtn">📷 Переснять</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
-
-    const oldModal = document.getElementById('photoPreviewModal');
-    if (oldModal) oldModal.remove();
-
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-
     const modal = new bootstrap.Modal(document.getElementById('photoPreviewModal'));
+    
+    // Устанавливаем изображение
+    document.getElementById('photoPreviewImage').src = canvas.toDataURL('image/jpeg', 0.95);
+    document.getElementById('photoScanningSpinner').style.display = 'inline-block';
+    document.getElementById('photoScanStatus').textContent = 'Распознавание...';
+    
     modal.show();
-
+    
     recognizeFromPhoto(canvas);
 }
 
 // ===== РАСПОЗНАВАНИЕ ПО ФОТО =====
 async function recognizeFromPhoto(canvas) {
-    const imgElement = document.getElementById('photoPreviewImage');
     const spinner = document.getElementById('photoScanningSpinner');
     const status = document.getElementById('photoScanStatus');
 
@@ -566,8 +529,12 @@ async function recognizeFromPhoto(canvas) {
         status.textContent = '❌ Не удалось распознать: ' + error.message;
         spinner.style.display = 'none';
         
+        // Удаляем старые кнопки
+        const oldBtns = document.querySelectorAll('.photo-retry-btn');
+        oldBtns.forEach(btn => btn.remove());
+        
         const retryBtn = document.createElement('button');
-        retryBtn.className = 'btn btn-warning mt-2';
+        retryBtn.className = 'btn btn-warning mt-2 photo-retry-btn';
         retryBtn.textContent = '🔄 Попробовать снова';
         retryBtn.onclick = function() {
             status.textContent = 'Распознавание...';
@@ -621,8 +588,11 @@ async function onScanSuccess(decodedText, decodedResult) {
 
 function onScanError(err) { /* игнорируем */ }
 
-// Обработчики модалки подтверждения
+// ============================
+// 8. ОБРАБОТЧИКИ СОБЫТИЙ
+// ============================
 document.addEventListener('DOMContentLoaded', function() {
+    // Подтверждение сканирования
     document.getElementById('confirmScanOkBtn')?.addEventListener('click', function() {
         const input = document.getElementById('confirmScanInput');
         let value = input.value.trim();
@@ -634,10 +604,12 @@ document.addEventListener('DOMContentLoaded', function() {
         if (modal) modal.hide();
         processScannedBarcode(value);
     });
+    
     document.getElementById('confirmScanEditBtn')?.addEventListener('click', function() {
         document.getElementById('confirmScanInput').focus();
         document.getElementById('confirmScanInput').select();
     });
+    
     document.getElementById('confirmScanInput')?.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') {
             document.getElementById('confirmScanOkBtn').click();
@@ -678,6 +650,9 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 
+// ============================
+// 9. ОБРАБОТКА ПОДТВЕРЖДЁННОГО ШТРИХ-КОДА
+// ============================
 async function processScannedBarcode(rawText) {
     const normalized = normalizeInventoryNumber(rawText);
     console.log('Поиск устройства по номеру:', normalized);
@@ -725,6 +700,9 @@ async function processScannedBarcode(rawText) {
     }
 }
 
+// ============================
+// 10. РУЧНОЙ ВВОД
+// ============================
 async function handleManualFind() {
     const input = document.getElementById('manualInvInput');
     if (!input) return;
@@ -741,7 +719,7 @@ async function handleManualFind() {
 }
 
 // ============================
-// 8. КАРТОЧКА УСТРОЙСТВА + ИСТОРИЯ
+// 11. КАРТОЧКА УСТРОЙСТВА + ИСТОРИЯ
 // ============================
 async function loadDeviceHistory(inventoryNumber) {
     try {
@@ -796,7 +774,7 @@ async function renderDeviceCard(device) {
 }
 
 // ============================
-// 9. ОБРАБОТЧИКИ ДЕЙСТВИЙ
+// 12. ОБРАБОТЧИКИ ДЕЙСТВИЙ
 // ============================
 async function performDeviceAction(action, data = {}) {
     if (!currentDevice) {
@@ -920,7 +898,7 @@ function removePendingAction(inventoryNumber) {
 }
 
 // ============================
-// 10. ОБОРОТНАЯ ВЕДОМОСТЬ
+// 13. ОБОРОТНАЯ ВЕДОМОСТЬ
 // ============================
 async function loadCabinetSelect() {
     const select = document.getElementById('cabinetSelect');
@@ -986,7 +964,7 @@ function renderChecklist(cabinetName) {
 }
 
 // ============================
-// 11. ОФЛАЙН-РЕЖИМ
+// 14. ОФЛАЙН-РЕЖИМ
 // ============================
 function savePendingScan(inventoryNumber, type = 'barcode') {
     let pending = JSON.parse(localStorage.getItem('pendingScans') || '[]');
@@ -1101,7 +1079,7 @@ async function syncPendingData() {
 }
 
 // ============================
-// 12. ЛОГИ
+// 15. ЛОГИ
 // ============================
 function renderLogs() {
     const container = document.getElementById('logsList');
@@ -1174,7 +1152,7 @@ window.createFromLog = function(inventoryNumber) {
 };
 
 // ============================
-// 13. МОДАЛКА СОЗДАНИЯ
+// 16. МОДАЛКА СОЗДАНИЯ
 // ============================
 function showCreateDeviceModal(inventoryNumber) {
     document.getElementById('createInventoryNumber').value = inventoryNumber;
@@ -1277,7 +1255,7 @@ async function confirmCreateDevice() {
 }
 
 // ============================
-// 14. ОТЧЁТ
+// 17. ОТЧЁТ
 // ============================
 function generateCSV(data) {
     if (!data || !Array.isArray(data) || data.length === 0) return '';
@@ -1363,7 +1341,7 @@ function printReport() {
 }
 
 // ============================
-// 15. НАВИГАЦИЯ
+// 18. НАВИГАЦИЯ
 // ============================
 let navButtons = [];
 let activePill = null;
@@ -1382,7 +1360,7 @@ function updateActivePill(smooth = true) {
 }
 
 // ============================
-// 16. ИНИЦИАЛИЗАЦИЯ
+// 19. ИНИЦИАЛИЗАЦИЯ
 // ============================
 document.addEventListener('DOMContentLoaded', async function() {
     const forceHideLoading = setTimeout(() => {
