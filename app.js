@@ -444,13 +444,19 @@ async function onScanSuccess(decodedText, decodedResult) {
 function onScanError(err) { /* игнорируем */ }
 
 // ============================
-// 7.1 РАСПОЗНАВАНИЕ С ФОТОГРАФИИ (ДОБАВЛЕНО)
+// 7.1 РАСПОЗНАВАНИЕ С ФОТОГРАФИИ (ИСПРАВЛЕННАЯ ВЕРСИЯ – КОЛБЭКИ)
 // ============================
 function captureAndScan() {
     if (isProcessingImage) return;
+    
     const videoElement = document.querySelector('#reader video');
     if (!videoElement) {
         showToast('Камера не активна', 'warning');
+        return;
+    }
+
+    if (videoElement.readyState < 2) {
+        showToast('Подождите, камера ещё не готова', 'warning');
         return;
     }
 
@@ -463,10 +469,13 @@ function captureAndScan() {
 
     try {
         const canvas = document.createElement('canvas');
-        canvas.width = videoElement.videoWidth || 1280;
-        canvas.height = videoElement.videoHeight || 720;
+        const width = videoElement.videoWidth || 1280;
+        const height = videoElement.videoHeight || 720;
+        canvas.width = width;
+        canvas.height = height;
         const ctx = canvas.getContext('2d');
-        ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+        ctx.drawImage(videoElement, 0, 0, width, height);
+
         canvas.toBlob(function(blob) {
             if (!blob) {
                 showToast('Не удалось захватить изображение', 'danger');
@@ -478,7 +487,7 @@ function captureAndScan() {
             }
             const file = new File([blob], 'scan.jpg', { type: 'image/jpeg' });
             processImageFile(file);
-        }, 'image/jpeg', 0.9);
+        }, 'image/jpeg', 0.95);
     } catch (e) {
         console.error('Ошибка захвата кадра:', e);
         showToast('Ошибка захвата: ' + e.message, 'danger');
@@ -494,32 +503,48 @@ function processImageFile(file) {
     isProcessingImage = true;
     showToast('Распознавание...', 'info');
 
+    if (!file || file.size === 0) {
+        showToast('Пустой файл', 'danger');
+        isProcessingImage = false;
+        if (document.getElementById('scanner').classList.contains('active')) {
+            initScanner();
+        }
+        return;
+    }
+
+    const config = {
+        fps: 10,
+        qrbox: { width: 600, height: 400 },
+        experimentalFeatures: {
+            useBarCodeDetectorIfSupported: true
+        }
+    };
+
     if (typeof Html5Qrcode.scanFile === 'function') {
-        const config = {
-            fps: 10,
-            qrbox: { width: 600, height: 400 },
-            experimentalFeatures: { useBarCodeDetectorIfSupported: true }
-        };
-        Html5Qrcode.scanFile(file, config)
-            .then(decodedText => {
+        Html5Qrcode.scanFile(
+            file,
+            config,
+            function(decodedText, decodedResult) {
+                console.log('Распознано с фото:', decodedText);
                 isProcessingImage = false;
-                // Обрабатываем результат так же, как при обычном сканировании
-                onScanSuccess(decodedText);
-                // После обработки перезапускаем сканер, если экран сканера активен
-                if (document.getElementById('scanner').classList.contains('active')) {
-                    setTimeout(() => initScanner(), 500);
-                }
-            })
-            .catch(err => {
-                console.error('Ошибка распознавания с фото:', err);
+                onScanSuccess(decodedText, decodedResult);
+                setTimeout(() => {
+                    if (document.getElementById('scanner').classList.contains('active')) {
+                        initScanner();
+                    }
+                }, 600);
+            },
+            function(errorMessage) {
+                console.error('Ошибка распознавания с фото:', errorMessage);
                 showToast('Не удалось распознать штрих-код на фото', 'warning');
                 isProcessingImage = false;
                 if (document.getElementById('scanner').classList.contains('active')) {
                     initScanner();
                 }
-            });
+            }
+        );
     } else {
-        showToast('Функция scanFile не поддерживается в этой версии библиотеки', 'danger');
+        showToast('Функция распознавания фото не поддерживается', 'danger');
         isProcessingImage = false;
         if (document.getElementById('scanner').classList.contains('active')) {
             initScanner();
