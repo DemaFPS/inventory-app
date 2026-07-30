@@ -1,6 +1,7 @@
 /**
  * app.js – Полная версия с подтверждением сканирования, отдельным листом History,
  * автоопределением форматов, увеличенной областью сканирования и экспериментальным детектором.
+ * ОПТИМИЗИРОВАНА ДЛЯ ДЛИННЫХ ШТРИХ-КОДОВ.
  */
 
 // ============================
@@ -334,7 +335,7 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 6. СКАНЕР (ОБНОВЛЁННЫЙ)
+// 6. СКАНЕР (ОПТИМИЗИРОВАН ДЛЯ ДЛИННЫХ ШТРИХ-КОДОВ)
 // ============================
 async function initScanner() {
     if (isInitializingScanner) return;
@@ -356,8 +357,12 @@ async function initScanner() {
 
         const containerWidth = readerElement.offsetWidth || 400;
         const config = {
-            fps: 15,
-            qrbox: { width: Math.min(containerWidth, 500), height: 350 },
+            fps: 20,
+            // Ключевое изменение: делаем область шире и ниже
+            qrbox: {
+                width: Math.min(containerWidth - 20, 650),
+                height: 250
+            },
             experimentalFeatures: {
                 useBarCodeDetectorIfSupported: true
             }
@@ -371,7 +376,7 @@ async function initScanner() {
         );
         isScanning = true;
         isInitializingScanner = false;
-        console.log('Сканер запущен с экспериментальным детектором');
+        console.log('Сканер запущен с оптимизацией для длинных кодов');
     } catch (err) {
         console.error('Ошибка запуска сканера:', err);
         showToast('Не удалось получить доступ к камере: ' + err.message, 'danger');
@@ -388,6 +393,9 @@ function stopScanner() {
     }
 }
 
+// ============================
+// 7. ОБРАБОТКА РЕЗУЛЬТАТА СКАНИРОВАНИЯ
+// ============================
 async function onScanSuccess(decodedText, decodedResult) {
     if (!decodedText) {
         console.warn('Пустой результат сканирования');
@@ -513,7 +521,7 @@ async function handleManualFind() {
 }
 
 // ============================
-// 7. КАРТОЧКА УСТРОЙСТВА
+// 8. КАРТОЧКА УСТРОЙСТВА + ИСТОРИЯ
 // ============================
 async function loadDeviceHistory(inventoryNumber) {
     try {
@@ -568,7 +576,7 @@ async function renderDeviceCard(device) {
 }
 
 // ============================
-// 8. ОБРАБОТЧИКИ ДЕЙСТВИЙ
+// 9. ОБРАБОТЧИКИ ДЕЙСТВИЙ
 // ============================
 async function performDeviceAction(action, data = {}) {
     if (!currentDevice) {
@@ -692,7 +700,7 @@ function removePendingAction(inventoryNumber) {
 }
 
 // ============================
-// 9. ОБОРОТНАЯ ВЕДОМОСТЬ
+// 10. ОБОРОТНАЯ ВЕДОМОСТЬ
 // ============================
 async function loadCabinetSelect() {
     const select = document.getElementById('cabinetSelect');
@@ -758,7 +766,7 @@ function renderChecklist(cabinetName) {
 }
 
 // ============================
-// 10. ОФЛАЙН-РЕЖИМ
+// 11. ОФЛАЙН-РЕЖИМ
 // ============================
 function savePendingScan(inventoryNumber, type = 'barcode') {
     let pending = JSON.parse(localStorage.getItem('pendingScans') || '[]');
@@ -873,7 +881,7 @@ async function syncPendingData() {
 }
 
 // ============================
-// 11. ЛОГИ
+// 12. ЛОГИ
 // ============================
 function renderLogs() {
     const container = document.getElementById('logsList');
@@ -946,7 +954,7 @@ window.createFromLog = function(inventoryNumber) {
 };
 
 // ============================
-// 12. МОДАЛКА СОЗДАНИЯ
+// 13. МОДАЛКА СОЗДАНИЯ
 // ============================
 function showCreateDeviceModal(inventoryNumber) {
     document.getElementById('createInventoryNumber').value = inventoryNumber;
@@ -1049,7 +1057,7 @@ async function confirmCreateDevice() {
 }
 
 // ============================
-// 13. ОТЧЁТ
+// 14. ОТЧЁТ
 // ============================
 function generateCSV(data) {
     if (!data || !Array.isArray(data) || data.length === 0) return '';
@@ -1135,7 +1143,7 @@ function printReport() {
 }
 
 // ============================
-// 14. НАВИГАЦИЯ
+// 15. НАВИГАЦИЯ
 // ============================
 let navButtons = [];
 let activePill = null;
@@ -1154,7 +1162,7 @@ function updateActivePill(smooth = true) {
 }
 
 // ============================
-// 15. ИНИЦИАЛИЗАЦИЯ
+// 16. ИНИЦИАЛИЗАЦИЯ
 // ============================
 document.addEventListener('DOMContentLoaded', async function() {
     const forceHideLoading = setTimeout(() => {
@@ -1313,6 +1321,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         });
 
+        // Карточка
         document.getElementById('editBtn')?.addEventListener('click', function() {
             if (!currentDevice) {
                 showToast('Устройство не выбрано', 'warning');
