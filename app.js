@@ -1,8 +1,7 @@
 /**
  * app.js – Полная версия с подтверждением сканирования, отдельным листом History,
  * автоопределением форматов, увеличенной областью сканирования, экспериментальным детектором,
- * поддержкой переворота экрана для сканирования длинных штрих-кодов
- * и ДОБАВЛЕННЫМ распознаванием с фотографии (снимок камеры / загрузка файла).
+ * поддержкой переворота экрана и ВКЛЮЧЕНИЕМ/ВЫКЛЮЧЕНИЕМ ФОНАРИКА.
  */
 
 // ============================
@@ -39,7 +38,7 @@ let currentUser = null;
 let localUserName = localStorage.getItem('localUserName') || 'Аноним';
 let isCreating = false;
 let pendingScanText = '';
-let isProcessingImage = false; // флаг для обработки фото
+let torchOn = false;
 
 // ============================
 // 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -337,7 +336,7 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 6. СКАНЕР (С ПОДДЕРЖКОЙ ПЕРЕВОРОТА ЭКРАНА)
+// 6. СКАНЕР (С ПОДДЕРЖКОЙ ПЕРЕВОРОТА ЭКРАНА И ФОНАРИКА)
 // ============================
 async function initScanner() {
     if (isInitializingScanner) return;
@@ -385,6 +384,11 @@ async function initScanner() {
         isScanning = true;
         isInitializingScanner = false;
         console.log('Сканер запущен с поддержкой переворота экрана');
+
+        // Показываем кнопку фонарика
+        const torchBtn = document.getElementById('torchBtn');
+        if (torchBtn) torchBtn.style.display = 'flex';
+
     } catch (err) {
         console.error('Ошибка запуска сканера:', err);
         showToast('Не удалось получить доступ к камере: ' + err.message, 'danger');
@@ -399,6 +403,10 @@ function stopScanner() {
             scannerInstance.stop().then(() => { isScanning = false; }).catch(err => console.warn('Остановка сканера:', err));
         } catch (e) { console.warn('Ошибка при остановке сканера', e); }
     }
+    // Скрываем кнопку фонарика
+    const torchBtn = document.getElementById('torchBtn');
+    if (torchBtn) torchBtn.style.display = 'none';
+    torchOn = false;
 }
 
 // ============================
@@ -444,103 +452,7 @@ async function onScanSuccess(decodedText, decodedResult) {
 function onScanError(err) { /* игнорируем */ }
 
 // ============================
-// 7.1 РАСПОЗНАВАНИЕ С ФОТОГРАФИИ (ДОБАВЛЕНО)
-// ============================
-function captureAndScan() {
-    if (isProcessingImage) return;
-    const videoElement = document.querySelector('#reader video');
-    if (!videoElement) {
-        showToast('Камера не активна', 'warning');
-        return;
-    }
-
-    if (scannerInstance && isScanning) {
-        stopScanner();
-    }
-
-    isProcessingImage = true;
-    showToast('Захват кадра...', 'info');
-
-    try {
-        const canvas = document.createElement('canvas');
-        canvas.width = videoElement.videoWidth || 1280;
-        canvas.height = videoElement.videoHeight || 720;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-        canvas.toBlob(function(blob) {
-            if (!blob) {
-                showToast('Не удалось захватить изображение', 'danger');
-                isProcessingImage = false;
-                if (document.getElementById('scanner').classList.contains('active')) {
-                    initScanner();
-                }
-                return;
-            }
-            const file = new File([blob], 'scan.jpg', { type: 'image/jpeg' });
-            processImageFile(file);
-        }, 'image/jpeg', 0.9);
-    } catch (e) {
-        console.error('Ошибка захвата кадра:', e);
-        showToast('Ошибка захвата: ' + e.message, 'danger');
-        isProcessingImage = false;
-        if (document.getElementById('scanner').classList.contains('active')) {
-            initScanner();
-        }
-    }
-}
-
-function processImageFile(file) {
-    if (isProcessingImage) return;
-    isProcessingImage = true;
-    showToast('Распознавание...', 'info');
-
-    if (typeof Html5Qrcode.scanFile === 'function') {
-        const config = {
-            fps: 10,
-            qrbox: { width: 600, height: 400 },
-            experimentalFeatures: { useBarCodeDetectorIfSupported: true }
-        };
-        Html5Qrcode.scanFile(file, config)
-            .then(decodedText => {
-                isProcessingImage = false;
-                // Обрабатываем результат так же, как при обычном сканировании
-                onScanSuccess(decodedText);
-                // После обработки перезапускаем сканер, если экран сканера активен
-                if (document.getElementById('scanner').classList.contains('active')) {
-                    setTimeout(() => initScanner(), 500);
-                }
-            })
-            .catch(err => {
-                console.error('Ошибка распознавания с фото:', err);
-                showToast('Не удалось распознать штрих-код на фото', 'warning');
-                isProcessingImage = false;
-                if (document.getElementById('scanner').classList.contains('active')) {
-                    initScanner();
-                }
-            });
-    } else {
-        showToast('Функция scanFile не поддерживается в этой версии библиотеки', 'danger');
-        isProcessingImage = false;
-        if (document.getElementById('scanner').classList.contains('active')) {
-            initScanner();
-        }
-    }
-}
-
-function handleFileUpload(file) {
-    if (!file) return;
-    if (!file.type.startsWith('image/')) {
-        showToast('Пожалуйста, выберите изображение', 'warning');
-        return;
-    }
-    if (scannerInstance && isScanning) {
-        stopScanner();
-    }
-    processImageFile(file);
-}
-
-// ============================
-// 8. ОБРАБОТЧИКИ DOM (ДОБАВЛЕНЫ НОВЫЕ)
+// 8. ОБРАБОТЧИКИ DOM
 // ============================
 document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('confirmScanOkBtn')?.addEventListener('click', function() {
@@ -564,6 +476,30 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    // ===== ФОНАРИК =====
+    document.getElementById('torchBtn')?.addEventListener('click', function() {
+        if (!scannerInstance) {
+            showToast('Сканер не запущен', 'warning');
+            return;
+        }
+        try {
+            if (typeof scannerInstance.toggleTorch === 'function') {
+                scannerInstance.toggleTorch();
+                torchOn = !torchOn;
+                this.innerHTML = torchOn ? 
+                    '<i class="bi bi-lightbulb-fill"></i> Выкл' : 
+                    '<i class="bi bi-lightbulb"></i> Фонарик';
+                this.classList.toggle('btn-warning', !torchOn);
+                this.classList.toggle('btn-success', torchOn);
+            } else {
+                showToast('Фонарик не поддерживается на этом устройстве', 'warning');
+            }
+        } catch (e) {
+            console.error('Ошибка переключения фонарика:', e);
+            showToast('Ошибка: ' + e.message, 'danger');
+        }
+    });
+
     window.addEventListener('resize', function() {
         if (document.getElementById('scanner').classList.contains('active')) {
             stopScanner();
@@ -583,22 +519,10 @@ document.addEventListener('DOMContentLoaded', function() {
             }, 400);
         }
     });
-
-    // ===== НОВЫЕ ОБРАБОТЧИКИ ДЛЯ ФОТО =====
-    document.getElementById('capturePhotoBtn')?.addEventListener('click', captureAndScan);
-    document.getElementById('uploadPhotoBtn')?.addEventListener('click', function() {
-        document.getElementById('fileInput')?.click();
-    });
-    document.getElementById('fileInput')?.addEventListener('change', function(e) {
-        if (this.files && this.files.length > 0) {
-            handleFileUpload(this.files[0]);
-            this.value = '';
-        }
-    });
 });
 
 // ============================
-// 9. ОБРАБОТКА РЕЗУЛЬТАТА СКАНИРОВАНИЯ (ПРОДОЛЖЕНИЕ)
+// 9. ОБРАБОТКА ПОДТВЕРЖДЁННОГО ШТРИХ-КОДА
 // ============================
 async function processScannedBarcode(rawText) {
     const normalized = normalizeInventoryNumber(rawText);

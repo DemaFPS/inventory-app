@@ -109,24 +109,18 @@
             </div>
         </div>
 
-        <!-- ЭКРАН 2: СКАНЕР (с кнопками для фото) -->
+        <!-- ЭКРАН 2: СКАНЕР (с кнопкой фонарика) -->
         <div id="scanner" class="screen">
             <div class="scanner-container">
                 <div class="scanner-header p-2 d-flex justify-content-between align-items-center">
                     <button id="backFromScanner" class="btn btn-outline-light btn-sm">
                         <i class="bi bi-arrow-left"></i> Назад
                     </button>
-                    <div>
-                        <button id="capturePhotoBtn" class="btn btn-primary btn-sm me-1" title="Сделать снимок">
-                            <i class="bi bi-camera"></i>
-                        </button>
-                        <button id="uploadPhotoBtn" class="btn btn-secondary btn-sm" title="Загрузить фото">
-                            <i class="bi bi-image"></i>
-                        </button>
-                        <input type="file" id="fileInput" accept="image/*" style="display:none;">
-                    </div>
+                    <button id="torchBtn" class="btn btn-warning btn-sm" title="Включить/выключить фонарик" style="display:none;">
+                        <i class="bi bi-lightbulb"></i> Фонарик
+                    </button>
                 </div>
-                <div id="reader" style="width:100%;"></div>
+                <div id="reader" style="width:100%; min-height:60vh; background:#000;"></div>
                 <div class="manual-input p-3 bg-white">
                     <div class="input-group">
                         <input type="text" id="manualInvInput" class="form-control" placeholder="Введите инв. номер">
