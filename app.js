@@ -1,8 +1,8 @@
 /**
  * app.js – Полная версия с подтверждением сканирования, отдельным листом History,
  * автоопределением форматов, увеличенной областью сканирования, экспериментальным детектором,
- * поддержкой переворота экрана и ВКЛЮЧЕНИЕМ/ВЫКЛЮЧЕНИЕМ ФОНАРИКА.
- * ИСПРАВЛЕНА ОШИБКА ОСТАНОВКИ СКАНЕРА.
+ * поддержкой переворота экрана и ВКЛЮЧЕНИЕМ/ВЫКЛЮЧЕНИЕМ ФОНАРИКА (через MediaStreamTrack).
+ * ИСПРАВЛЕНА ОСТАНОВКА СКАНЕРА И УПРАВЛЕНИЕ ФОНАРИКОМ.
  */
 
 // ============================
@@ -40,6 +40,7 @@ let localUserName = localStorage.getItem('localUserName') || 'Аноним';
 let isCreating = false;
 let pendingScanText = '';
 let torchOn = false;
+let torchTrack = null; // для управления фонариком
 
 // ============================
 // 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -390,6 +391,32 @@ async function initScanner() {
         const torchBtn = document.getElementById('torchBtn');
         if (torchBtn) torchBtn.style.display = 'flex';
 
+        // Сохраняем трек для фонарика
+        try {
+            const videoElement = readerElement.querySelector('video');
+            if (videoElement && videoElement.srcObject) {
+                const tracks = videoElement.srcObject.getVideoTracks();
+                if (tracks.length > 0) {
+                    torchTrack = tracks[0];
+                    // Проверяем поддержку фонарика
+                    if (typeof torchTrack.getCapabilities === 'function') {
+                        const caps = torchTrack.getCapabilities();
+                        if (caps && caps.torch) {
+                            console.log('Фонарик поддерживается');
+                        } else {
+                            console.log('Фонарик не поддерживается');
+                            torchTrack = null;
+                        }
+                    } else {
+                        torchTrack = null;
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('Не удалось получить трек для фонарика:', e);
+            torchTrack = null;
+        }
+
     } catch (err) {
         console.error('Ошибка запуска сканера:', err);
         showToast('Не удалось получить доступ к камере: ' + err.message, 'danger');
@@ -398,23 +425,31 @@ async function initScanner() {
     }
 }
 
-// ============================
-// 6.1 ИСПРАВЛЕННАЯ ФУНКЦИЯ ОСТАНОВКИ СКАНЕРА
-// ============================
 function stopScanner() {
-    // Если сканер уже не активен или не инициализирован – просто выходим
     if (!scannerInstance || !isScanning) {
-        // Скрываем кнопку фонарика
         const torchBtn = document.getElementById('torchBtn');
         if (torchBtn) torchBtn.style.display = 'none';
         torchOn = false;
+        torchTrack = null;
         return;
     }
 
     try {
-        // Используем Promise с защитой от двойного вызова
+        // Выключаем фонарик при остановке
+        if (torchOn && torchTrack) {
+            try {
+                torchTrack.applyConstraints({ advanced: [{ torch: false }] });
+                torchOn = false;
+                const torchBtn = document.getElementById('torchBtn');
+                if (torchBtn) {
+                    torchBtn.innerHTML = '<i class="bi bi-lightbulb"></i> Фонарик';
+                    torchBtn.classList.remove('btn-success');
+                    torchBtn.classList.add('btn-warning');
+                }
+            } catch (e) {}
+        }
+
         if (scannerInstance && typeof scannerInstance.stop === 'function') {
-            // Небольшая задержка, чтобы избежать конфликтов переходов
             setTimeout(() => {
                 scannerInstance.stop()
                     .then(() => {
@@ -434,10 +469,10 @@ function stopScanner() {
         isScanning = false;
     }
 
-    // Скрываем кнопку фонарика
     const torchBtn = document.getElementById('torchBtn');
     if (torchBtn) torchBtn.style.display = 'none';
     torchOn = false;
+    torchTrack = null;
 }
 
 // ============================
@@ -507,24 +542,32 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // ===== ФОНАРИК =====
+    // ===== ФОНАРИК (через MediaStreamTrack) =====
     document.getElementById('torchBtn')?.addEventListener('click', function() {
         if (!scannerInstance) {
             showToast('Сканер не запущен', 'warning');
             return;
         }
+        if (!torchTrack) {
+            showToast('Фонарик не поддерживается на этом устройстве', 'warning');
+            return;
+        }
         try {
-            if (typeof scannerInstance.toggleTorch === 'function') {
-                scannerInstance.toggleTorch();
-                torchOn = !torchOn;
+            const newState = !torchOn;
+            torchTrack.applyConstraints({
+                advanced: [{ torch: newState }]
+            }).then(() => {
+                torchOn = newState;
                 this.innerHTML = torchOn ? 
                     '<i class="bi bi-lightbulb-fill"></i> Выкл' : 
                     '<i class="bi bi-lightbulb"></i> Фонарик';
                 this.classList.toggle('btn-warning', !torchOn);
                 this.classList.toggle('btn-success', torchOn);
-            } else {
-                showToast('Фонарик не поддерживается на этом устройстве', 'warning');
-            }
+                console.log('Фонарик:', torchOn ? 'ВКЛ' : 'ВЫКЛ');
+            }).catch(err => {
+                console.error('Ошибка переключения фонарика:', err);
+                showToast('Ошибка: ' + err.message, 'danger');
+            });
         } catch (e) {
             console.error('Ошибка переключения фонарика:', e);
             showToast('Ошибка: ' + e.message, 'danger');
