@@ -2,6 +2,7 @@
  * app.js – Полная версия с подтверждением сканирования, отдельным листом History,
  * автоопределением форматов, увеличенной областью сканирования, экспериментальным детектором,
  * поддержкой переворота экрана и ВКЛЮЧЕНИЕМ/ВЫКЛЮЧЕНИЕМ ФОНАРИКА.
+ * ИСПРАВЛЕНА ОШИБКА ОСТАНОВКИ СКАНЕРА.
  */
 
 // ============================
@@ -397,12 +398,42 @@ async function initScanner() {
     }
 }
 
+// ============================
+// 6.1 ИСПРАВЛЕННАЯ ФУНКЦИЯ ОСТАНОВКИ СКАНЕРА
+// ============================
 function stopScanner() {
-    if (scannerInstance && isScanning) {
-        try {
-            scannerInstance.stop().then(() => { isScanning = false; }).catch(err => console.warn('Остановка сканера:', err));
-        } catch (e) { console.warn('Ошибка при остановке сканера', e); }
+    // Если сканер уже не активен или не инициализирован – просто выходим
+    if (!scannerInstance || !isScanning) {
+        // Скрываем кнопку фонарика
+        const torchBtn = document.getElementById('torchBtn');
+        if (torchBtn) torchBtn.style.display = 'none';
+        torchOn = false;
+        return;
     }
+
+    try {
+        // Используем Promise с защитой от двойного вызова
+        if (scannerInstance && typeof scannerInstance.stop === 'function') {
+            // Небольшая задержка, чтобы избежать конфликтов переходов
+            setTimeout(() => {
+                scannerInstance.stop()
+                    .then(() => {
+                        isScanning = false;
+                        console.log('Сканер успешно остановлен');
+                    })
+                    .catch(err => {
+                        console.warn('Ошибка при остановке сканера:', err);
+                        isScanning = false;
+                    });
+            }, 100);
+        } else {
+            isScanning = false;
+        }
+    } catch (e) {
+        console.warn('Исключение при остановке сканера:', e);
+        isScanning = false;
+    }
+
     // Скрываем кнопку фонарика
     const torchBtn = document.getElementById('torchBtn');
     if (torchBtn) torchBtn.style.display = 'none';
