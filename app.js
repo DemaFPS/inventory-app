@@ -3,7 +3,8 @@
  * добавлением аудитории при создании, отображением аудитории на карточке,
  * скрытием комментария в истории перемещений (на карточке),
  * возможностью добавить комментарий при редактировании,
- * корректным обновлением аудитории (с синхронизацией Checklists).
+ * корректным обновлением аудитории (с синхронизацией Checklists),
+ * исправленной оборотной ведомостью с добавлением/удалением номеров.
  * Адаптировано под новую структуру листа Inventory (колонка "Аудитория").
  */
 
@@ -26,7 +27,7 @@ const auth = firebase.auth();
 // ============================
 // 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbxHN_nunw2862QvX7hknyFfqd_APAJg4OjPszbg2tQJNN_Bfy0gD-gubm_kdVuqYT2o/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwRvUgu19JP6p2RMOfoknEyj71zJPzGRdaEmsMPPZeJsviwooq3MVHY4GVOUfHfvgbo/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -747,13 +748,32 @@ document.addEventListener('DOMContentLoaded', function() {
             showToast('Неверный формат номера (6-20 символов)', 'danger');
             return;
         }
+        // Проверяем, есть ли уже такой номер в списке
+        const existingItems = document.querySelectorAll('#checklistItems .list-group-item span');
+        for (let span of existingItems) {
+            if (span.textContent.trim() === num) {
+                showToast('Такой номер уже есть в списке', 'warning');
+                return;
+            }
+        }
         const container = document.getElementById('checklistItems');
         const newItem = document.createElement('div');
         newItem.className = 'list-group-item d-flex justify-content-between align-items-center list-group-item-light';
         const exists = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(num));
+        let controls = '';
+        if (isChecklistEditMode) {
+            controls = `
+                <div>
+                    <input type="checkbox" class="form-check-input me-2 checklist-item-checkbox" data-inv="${num}">
+                    <button class="btn btn-sm btn-outline-danger remove-checklist-item" data-inv="${num}" title="Удалить номер">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+            `;
+        }
         newItem.innerHTML = `
             <div>
-                <input type="checkbox" class="form-check-input me-2 checklist-item-checkbox" data-inv="${num}">
+                ${controls}
                 <span>${num}</span>
             </div>
             <span class="badge bg-${exists ? 'success' : 'warning'}">${exists ? '✓ Найдено' : '❓ Не найдено'}</span>
@@ -761,6 +781,22 @@ document.addEventListener('DOMContentLoaded', function() {
         container.appendChild(newItem);
         input.value = '';
         showToast('Номер добавлен в список', 'success');
+        // Обновляем прогресс
+        updateChecklistProgress();
+        // Вешаем обработчик на кнопку удаления (если она есть)
+        const removeBtn = newItem.querySelector('.remove-checklist-item');
+        if (removeBtn) {
+            removeBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const invNum = this.dataset.inv;
+                const item = this.closest('.list-group-item');
+                if (item) {
+                    item.remove();
+                    showToast(`Номер ${invNum} удалён из списка`, 'info');
+                    updateChecklistProgress();
+                }
+            });
+        }
     });
 
     document.getElementById('removeSelectedChecklistBtn')?.addEventListener('click', function() {
@@ -775,6 +811,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (item) item.remove();
         });
         showToast(`Удалено ${checked.length} элементов`, 'success');
+        updateChecklistProgress();
     });
 
     // ===== ВКЛАДКА "ТАБЛИЦА" =====
@@ -1076,9 +1113,7 @@ async function performDeviceAction(action, data = {}) {
                 const oldCabinet = currentDevice.cabinet || '';
                 const newCabinet = data.cabinet;
                 if (oldCabinet !== newCabinet) {
-                    // Обновляем аудиторию в списке
                     updates.cabinet = newCabinet;
-                    // Обновляем старую аудиторию (удаляем номер)
                     if (oldCabinet) {
                         const oldCab = cabinetsData.find(c => c.cabinet === oldCabinet);
                         if (oldCab) {
@@ -1088,7 +1123,6 @@ async function performDeviceAction(action, data = {}) {
                             if (idx !== -1) cabinetsData[idx].inventoryNumbers = numbers;
                         }
                     }
-                    // Обновляем новую аудиторию (добавляем номер)
                     if (newCabinet) {
                         const newCab = cabinetsData.find(c => c.cabinet === newCabinet);
                         let numbers = newCab ? newCab.inventoryNumbers : [];
@@ -1217,11 +1251,21 @@ function renderChecklist(cabinetName) {
         if (exists) found++;
         const statusClass = exists ? 'list-group-item-success' : 'list-group-item-danger';
         const statusText = exists ? '✓ Найдено' : '✗ Не найдено';
-        const checkBox = isChecklistEditMode ? `<input type="checkbox" class="form-check-input me-2 checklist-item-checkbox" data-inv="${num}">` : '';
+        let controls = '';
+        if (isChecklistEditMode) {
+            controls = `
+                <div>
+                    <input type="checkbox" class="form-check-input me-2 checklist-item-checkbox" data-inv="${num}">
+                    <button class="btn btn-sm btn-outline-danger remove-checklist-item" data-inv="${num}" title="Удалить номер">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+            `;
+        }
         itemsHtml += `
             <div class="list-group-item d-flex justify-content-between align-items-center ${statusClass}">
                 <div>
-                    ${checkBox}
+                    ${controls}
                     <span>${num}</span>
                 </div>
                 <span class="badge bg-${exists ? 'success' : 'danger'}">${statusText}</span>
@@ -1245,8 +1289,38 @@ function renderChecklist(cabinetName) {
         document.getElementById('editChecklistBtn').style.display = 'none';
         document.getElementById('saveChecklistBtn').style.display = 'inline-block';
         document.getElementById('checklistEditControls').style.display = 'grid';
+        // Вешаем обработчики на кнопки удаления
+        document.querySelectorAll('.remove-checklist-item').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const invNum = this.dataset.inv;
+                const item = this.closest('.list-group-item');
+                if (item) {
+                    item.remove();
+                    showToast(`Номер ${invNum} удалён из списка`, 'info');
+                    updateChecklistProgress();
+                }
+            });
+        });
+        // Снимаем все чекбоксы
         document.querySelectorAll('.checklist-item-checkbox').forEach(cb => cb.checked = false);
     }
+}
+
+// ===== НОВАЯ ФУНКЦИЯ ДЛЯ ОБНОВЛЕНИЯ ПРОГРЕССА =====
+function updateChecklistProgress() {
+    const items = document.querySelectorAll('#checklistItems .list-group-item');
+    let found = 0;
+    items.forEach(item => {
+        const badge = item.querySelector('.badge');
+        if (badge && badge.textContent.includes('✓')) found++;
+    });
+    const total = items.length;
+    document.getElementById('progressText').textContent = `${found} из ${total}`;
+    const percent = total ? Math.round((found / total) * 100) : 0;
+    document.getElementById('progressBar').style.width = percent + '%';
+    document.getElementById('progressBar').textContent = percent + '%';
+    document.getElementById('progressBar').setAttribute('aria-valuenow', percent);
 }
 
 // ============================
