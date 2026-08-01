@@ -7,6 +7,7 @@
  * - Все массивы номеров уникализируются перед сохранением.
  * - Печать отчёта – таблица на всю страницу, центрированный заголовок.
  * - Мгновенное сохранение, автоматическое обновление статуса.
+ * - В таблице (вкладка «Таблица») колонка «История перемещений» показывает только последнее событие и не редактируется.
  */
 
 // ============================
@@ -28,7 +29,7 @@ const auth = firebase.auth();
 // ============================
 // 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbykVTVIOuPDUCM3L7DmFuKB1OHBsM04iZOUfKnfjr8RlLkHqEne1Dct0EKVJK9fhTVA/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwukLzwHcPMuhe6pZXQ1VqDlC2yhQ0ILrMo7DGmGcP371_-ZllN4Qq8oRN_fKAaPMrz/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -1444,6 +1445,9 @@ function applyFiltersAndSearch() {
     document.getElementById('dataStatus').textContent = `Показано ${tableFilteredData.length} из ${tableData.length} строк`;
 }
 
+// ============================================================
+// ИСПРАВЛЕННАЯ ФУНКЦИЯ renderTable – показывает только последнюю запись истории и запрещает редактирование этой колонки
+// ============================================================
 function renderTable(data) {
     const tableBody = document.getElementById('dataTableBody');
     const thead = document.getElementById('dataTableHead');
@@ -1454,26 +1458,48 @@ function renderTable(data) {
         tableBody.innerHTML = '<tr><td colspan="100" class="text-muted text-center">Нет данных</td></tr>';
         return;
     }
+
+    // Найти индекс колонки "История перемещений"
+    const historyIndex = tableHeaders.findIndex(h =>
+        h.trim().toLowerCase() === 'история перемещений' ||
+        h.trim().toLowerCase() === 'history'
+    );
+
     let html = '';
     data.forEach((row, index) => {
         const sheetRow = index + 2;
+        // Копируем строку и заменяем историю на последнее событие (для отображения)
+        const rowCopy = row.slice();
+        if (historyIndex !== -1 && rowCopy[historyIndex]) {
+            const historyStr = rowCopy[historyIndex];
+            const events = historyStr.split('; ').filter(s => s.trim());
+            rowCopy[historyIndex] = events.length > 0 ? events[events.length - 1] : '';
+        }
         html += `<tr>
             <td><input type="checkbox" class="row-selector" data-sheet-row="${sheetRow}" data-filtered-index="${index}"></td>
-            ${row.map(cell => `<td>${cell !== undefined && cell !== null ? cell : ''}</td>`).join('')}
+            ${rowCopy.map(cell => `<td>${cell !== undefined && cell !== null ? cell : ''}</td>`).join('')}
         </tr>`;
     });
     tableBody.innerHTML = html;
 
+    // Назначаем редактирование только для колонок, кроме истории
     document.querySelectorAll('#dataTableBody td:not(:first-child)').forEach(td => {
+        const tr = td.parentElement;
+        const colIndex = Array.from(tr.children).indexOf(td) - 1; // -1 из-за чекбокса
+        // Если это колонка истории – не делаем редактируемой
+        if (colIndex === historyIndex) {
+            td.style.backgroundColor = '#f8f9fa'; // лёгкий фон, чтобы было видно, что не редактируется
+            return;
+        }
         td.setAttribute('contenteditable', 'true');
         td.addEventListener('blur', function() {
             const newValue = this.textContent.trim();
-            const tr = this.parentElement;
-            const colIndex = Array.from(tr.children).indexOf(this) - 1;
-            const sheetRow = parseInt(tr.querySelector('.row-selector').dataset.sheetRow);
+            const tr2 = this.parentElement;
+            const colIdx = Array.from(tr2.children).indexOf(this) - 1;
+            const sheetRow = parseInt(tr2.querySelector('.row-selector').dataset.sheetRow);
             const sheet = document.getElementById('sheetSelect').value;
-            if (sheetRow && colIndex >= 0) {
-                updateSheetCell(sheet, sheetRow, colIndex, newValue).catch(() => {});
+            if (sheetRow && colIdx >= 0) {
+                updateSheetCell(sheet, sheetRow, colIdx, newValue).catch(() => {});
             }
         });
         td.addEventListener('focus', function() {
@@ -1775,7 +1801,7 @@ async function confirmCreateDevice() {
 }
 
 // ============================
-// 19. ОТЧЁТ (ИСПРАВЛЕННАЯ ПЕЧАТЬ)
+// 19. ОТЧЁТ (ИСПРАВЛЕННАЯ ПЕЧАТЬ – таблица на всю страницу)
 // ============================
 function generateCSV(data) {
     if (!data || !Array.isArray(data) || data.length === 0) return '';
@@ -1816,6 +1842,9 @@ function downloadCSV(csv) {
     URL.revokeObjectURL(url);
 }
 
+// ============================================================
+// ИСПРАВЛЕННАЯ ФУНКЦИЯ printReport – таблица на всю страницу
+// ============================================================
 function printReport() {
     if (!inventoryData || inventoryData.length === 0) {
         showToast('Нет данных для печати', 'warning');
@@ -1837,7 +1866,7 @@ function printReport() {
         return;
     }
 
-    // Стили для печати
+    // Стили для печати – таблица на всю страницу, заголовок по центру
     const style = document.createElement('style');
     style.id = 'print-report-style';
     style.textContent = `
@@ -1862,9 +1891,9 @@ function printReport() {
             width: 100%;
         }
         #report-print-content table {
-            width: 100%;
+            width: 100% !important;
             border-collapse: collapse;
-            table-layout: fixed;
+            table-layout: auto !important;
             font-size: 10pt;
         }
         #report-print-content th, #report-print-content td {
@@ -1879,14 +1908,6 @@ function printReport() {
             background-color: #f0f0f0;
             font-weight: bold;
         }
-        #report-print-content colgroup col:nth-child(1) { width: 12%; }
-        #report-print-content colgroup col:nth-child(2) { width: 10%; }
-        #report-print-content colgroup col:nth-child(3) { width: 12%; }
-        #report-print-content colgroup col:nth-child(4) { width: 15%; }
-        #report-print-content colgroup col:nth-child(5) { width: 10%; }
-        #report-print-content colgroup col:nth-child(6) { width: 12%; }
-        #report-print-content colgroup col:nth-child(7) { width: 12%; }
-        #report-print-content colgroup col:nth-child(8) { width: 17%; }
     `;
     document.head.appendChild(style);
 
@@ -1901,11 +1922,8 @@ function printReport() {
     title.textContent = cabinetName ? `Аудитория: ${cabinetName}` : 'Общий отчёт по инвентаризации';
     printDiv.appendChild(title);
 
-    // Таблица
+    // Таблица (без colgroup, чтобы колонки сами распределялись)
     let tableHtml = `<table>
-        <colgroup>
-            <col><col><col><col><col><col><col><col>
-        </colgroup>
         <thead><tr>
             <th>Инв. номер</th>
             <th>Аудитория</th>
