@@ -1,13 +1,11 @@
 /**
- * app.js – ИТОГОВАЯ ВЕРСИЯ (без дублирования)
+ * app.js – ИТОГОВАЯ ВЕРСИЯ (с исправлениями дат и печати)
  * 
  * Исправления:
- * - При добавлении номера в ведомость сначала проверяется его наличие в актуальном списке аудитории.
- * - После вызова ensureDeviceActiveAndInCabinet (которая может добавить номер) повторно проверяется наличие.
- * - Все массивы номеров уникализируются перед сохранением.
- * - Печать отчёта – таблица на всю страницу, центрированный заголовок.
- * - Мгновенное сохранение, автоматическое обновление статуса.
- * - В таблице (вкладка «Таблица») колонка «История перемещений» показывает только последнее событие и не редактируется.
+ * - В таблице (вкладка «Таблица») колонки с датами автоматически форматируются в ДД.ММ.ГГГГ.
+ * - Колонка «История перемещений» показывает только последнее событие и не редактируется.
+ * - Печать отчёта адаптирована под мобильные устройства, таблица занимает всю ширину страницы.
+ * - Остальные исправления: уникализация номеров, проверка дубликатов, офлайн-режим и т.д.
  */
 
 // ============================
@@ -29,7 +27,7 @@ const auth = firebase.auth();
 // ============================
 // 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwukLzwHcPMuhe6pZXQ1VqDlC2yhQ0ILrMo7DGmGcP371_-ZllN4Qq8oRN_fKAaPMrz/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwpSOa_xO74GmNpeOBZsteTm4niWRpwXVgJY07kC2vZy1zX-ZWp0ZQMVSwVAxqWAMs/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -189,7 +187,6 @@ function getInitiatorName() {
     return localUserName || 'Аноним';
 }
 
-// ===== Вспомогательная функция для уникализации массива =====
 function uniqueArray(arr) {
     return arr.filter((v, i, a) => a.indexOf(v) === i);
 }
@@ -230,7 +227,6 @@ async function loadInventory() {
             if (c && c.inventoryNumbers && typeof c.inventoryNumbers === 'string') {
                 c.inventoryNumbers = c.inventoryNumbers.split(',').map(s => s.trim());
             }
-            // Уникализируем номера в каждой аудитории
             if (c && c.inventoryNumbers) {
                 c.inventoryNumbers = uniqueArray(c.inventoryNumbers);
             }
@@ -248,7 +244,6 @@ async function loadInventory() {
             try {
                 inventoryData = JSON.parse(cachedInv) || [];
                 cabinetsData = JSON.parse(cachedCab) || [];
-                // Уникализируем
                 cabinetsData.forEach(c => { if (c.inventoryNumbers) c.inventoryNumbers = uniqueArray(c.inventoryNumbers); });
                 showToast('Загружены данные из кэша (офлайн-режим)', 'warning');
                 return { inventory: inventoryData, cabinets: cabinetsData };
@@ -345,7 +340,7 @@ async function addDevice(deviceData) {
             let numbers = cab ? cab.inventoryNumbers : [];
             if (!numbers.includes(inventoryNumber)) {
                 numbers.push(inventoryNumber);
-                numbers = uniqueArray(numbers); // уникализируем
+                numbers = uniqueArray(numbers);
                 await updateCabinetList(cabinet, numbers);
                 const cabIdx = cabinetsData.findIndex(c => c.cabinet === cabinet);
                 if (cabIdx !== -1) {
@@ -397,7 +392,6 @@ async function updateSheetCell(sheetName, row, col, value) {
 }
 
 async function updateCabinetList(cabinetName, inventoryNumbers) {
-    // Уникализируем перед отправкой
     const unique = uniqueArray(inventoryNumbers);
     try {
         const result = await callProxy('updateChecklist', { cabinet: cabinetName, inventoryNumbers: unique });
@@ -683,7 +677,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Фонарик
     document.getElementById('torchBtn')?.addEventListener('click', function() {
         if (!scannerInstance) {
             showToast('Сканер не запущен', 'warning');
@@ -746,7 +739,6 @@ document.addEventListener('DOMContentLoaded', function() {
         renderChecklist(cabinet);
     });
 
-    // ИСПРАВЛЕННЫЙ ОБРАБОТЧИК ДОБАВЛЕНИЯ (без дублирования)
     document.getElementById('addChecklistItemBtn')?.addEventListener('click', async function() {
         const input = document.getElementById('newChecklistItemInput');
         if (!input || !input.value.trim()) {
@@ -764,10 +756,8 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        // 1. Загружаем свежие данные
         await loadInventory();
 
-        // 2. Проверяем, есть ли номер в текущем списке аудитории
         const currentCabinet = cabinetsData.find(c => c.cabinet === cabinet);
         const currentNumbers = currentCabinet ? currentCabinet.inventoryNumbers : [];
         if (currentNumbers.some(n => normalizeInventoryNumber(n) === normalizeInventoryNumber(num))) {
@@ -775,27 +765,21 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        // 3. Обеспечиваем активный статус и аудиторию (может добавить номер)
         await ensureDeviceActiveAndInCabinet(num, cabinet);
 
-        // 4. После ensureDeviceActiveAndInCabinet – перезагружаем данные, чтобы получить актуальный список
         await loadInventory();
 
-        // 5. Снова проверяем наличие номера в списке аудитории (возможно, он уже был добавлен)
         const updatedCabinet = cabinetsData.find(c => c.cabinet === cabinet);
         const updatedNumbers = updatedCabinet ? updatedCabinet.inventoryNumbers : [];
         if (updatedNumbers.some(n => normalizeInventoryNumber(n) === normalizeInventoryNumber(num))) {
-            // Номер уже есть – просто перерисовываем и выходим
             renderChecklist(cabinet);
             input.value = '';
             showToast('Номер уже присутствует в списке', 'info');
             return;
         }
 
-        // 6. Если номера всё ещё нет – добавляем его
         const newNumbers = uniqueArray([...updatedNumbers, num]);
         await updateCabinetList(cabinet, newNumbers);
-        // Обновляем локальные данные
         const cabIdx = cabinetsData.findIndex(c => c.cabinet === cabinet);
         if (cabIdx !== -1) {
             cabinetsData[cabIdx].inventoryNumbers = newNumbers;
@@ -809,7 +793,6 @@ document.addEventListener('DOMContentLoaded', function() {
         showToast('Номер добавлен в список', 'success');
     });
 
-    // Обработчик удаления выбранных (с уникализацией)
     document.getElementById('removeSelectedChecklistBtn')?.addEventListener('click', function() {
         const checked = document.querySelectorAll('.checklist-item-checkbox:checked');
         if (checked.length === 0) {
@@ -822,19 +805,16 @@ document.addEventListener('DOMContentLoaded', function() {
             showToast('Аудитория не выбрана', 'warning');
             return;
         }
-        // Собираем оставшиеся номера из DOM
         const items = document.querySelectorAll('#checklistItems .list-group-item span');
         const numbers = [];
         items.forEach(span => {
             const num = span.textContent.trim();
             if (num) numbers.push(num);
         });
-        // Удаляем выбранные
         checked.forEach(cb => {
             const item = cb.closest('.list-group-item');
             if (item) item.remove();
         });
-        // Собираем новый список после удаления
         const finalNumbers = [];
         document.querySelectorAll('#checklistItems .list-group-item span').forEach(span => {
             const num = span.textContent.trim();
@@ -1273,7 +1253,6 @@ function renderChecklist(cabinetName) {
         return;
     }
 
-    // Убедимся, что номера уникальны
     const invNumbers = uniqueArray(cabinet.inventoryNumbers || []);
     let found = 0;
     let itemsHtml = '';
@@ -1328,7 +1307,6 @@ function renderChecklist(cabinetName) {
                 const cabinet = document.getElementById('cabinetSelect')?.value;
                 if (item && cabinet) {
                     item.remove();
-                    // Собираем новый список
                     const newNumbers = [];
                     document.querySelectorAll('#checklistItems .list-group-item span').forEach(span => {
                         const num = span.textContent.trim();
@@ -1446,7 +1424,7 @@ function applyFiltersAndSearch() {
 }
 
 // ============================================================
-// ИСПРАВЛЕННАЯ ФУНКЦИЯ renderTable – показывает только последнюю запись истории и запрещает редактирование этой колонки
+// ИСПРАВЛЕННАЯ ФУНКЦИЯ renderTable – форматирование дат, последняя запись истории, запрет редактирования истории
 // ============================================================
 function renderTable(data) {
     const tableBody = document.getElementById('dataTableBody');
@@ -1459,17 +1437,34 @@ function renderTable(data) {
         return;
     }
 
-    // Найти индекс колонки "История перемещений"
+    // Индекс колонки "История перемещений"
     const historyIndex = tableHeaders.findIndex(h =>
         h.trim().toLowerCase() === 'история перемещений' ||
         h.trim().toLowerCase() === 'history'
     );
+    // Индексы колонок с датами (по ключевым словам)
+    const dateColumns = [];
+    tableHeaders.forEach((h, idx) => {
+        const lower = h.trim().toLowerCase();
+        if (lower.includes('дата') || lower.includes('date') || lower.includes('гарант')) {
+            dateColumns.push(idx);
+        }
+    });
 
     let html = '';
     data.forEach((row, index) => {
         const sheetRow = index + 2;
-        // Копируем строку и заменяем историю на последнее событие (для отображения)
         const rowCopy = row.slice();
+        // Форматируем даты
+        dateColumns.forEach(colIdx => {
+            if (rowCopy[colIdx]) {
+                const formatted = formatDate(rowCopy[colIdx]);
+                if (formatted !== '—') {
+                    rowCopy[colIdx] = formatted;
+                }
+            }
+        });
+        // Заменяем историю на последнее событие
         if (historyIndex !== -1 && rowCopy[historyIndex]) {
             const historyStr = rowCopy[historyIndex];
             const events = historyStr.split('; ').filter(s => s.trim());
@@ -1482,11 +1477,10 @@ function renderTable(data) {
     });
     tableBody.innerHTML = html;
 
-    // Назначаем редактирование только для колонок, кроме истории
+    // Назначаем редактирование (кроме колонки истории)
     document.querySelectorAll('#dataTableBody td:not(:first-child)').forEach(td => {
         const tr = td.parentElement;
-        const colIndex = Array.from(tr.children).indexOf(td) - 1; // -1 из-за чекбокса
-        // Если это колонка истории – не делаем редактируемой
+        const colIndex = Array.from(tr.children).indexOf(td) - 1;
         if (colIndex === historyIndex) {
             td.style.backgroundColor = '#f8f9fa'; // лёгкий фон, чтобы было видно, что не редактируется
             return;
@@ -1801,7 +1795,7 @@ async function confirmCreateDevice() {
 }
 
 // ============================
-// 19. ОТЧЁТ (ИСПРАВЛЕННАЯ ПЕЧАТЬ – таблица на всю страницу)
+// 19. ОТЧЁТ
 // ============================
 function generateCSV(data) {
     if (!data || !Array.isArray(data) || data.length === 0) return '';
@@ -1843,7 +1837,7 @@ function downloadCSV(csv) {
 }
 
 // ============================================================
-// ИСПРАВЛЕННАЯ ФУНКЦИЯ printReport – таблица на всю страницу
+// ИСПРАВЛЕННАЯ ФУНКЦИЯ printReport – адаптивная печать на всю страницу
 // ============================================================
 function printReport() {
     if (!inventoryData || inventoryData.length === 0) {
@@ -1866,15 +1860,24 @@ function printReport() {
         return;
     }
 
-    // Стили для печати – таблица на всю страницу, заголовок по центру
+    // Стили для печати – адаптивные, таблица на всю ширину
     const style = document.createElement('style');
     style.id = 'print-report-style';
     style.textContent = `
-        @page { size: landscape; margin: 5mm; }
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; }
+        @page { 
+            size: landscape; 
+            margin: 5mm; 
+        }
+        body, html { 
+            margin: 0; 
+            padding: 0; 
+            width: 100%; 
+            height: 100%; 
+            background: white;
+        }
         #report-print-content {
-            width: 100%;
-            height: 100%;
+            width: 100% !important;
+            height: 100% !important;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -1882,6 +1885,7 @@ function printReport() {
             font-family: Arial, sans-serif;
             padding: 10px;
             box-sizing: border-box;
+            background: white;
         }
         #report-print-content .report-title {
             font-size: 22pt;
@@ -1892,21 +1896,46 @@ function printReport() {
         }
         #report-print-content table {
             width: 100% !important;
-            border-collapse: collapse;
+            border-collapse: collapse !important;
             table-layout: auto !important;
             font-size: 10pt;
         }
         #report-print-content th, #report-print-content td {
-            border: 1px solid #000;
-            padding: 4px 6px;
+            border: 1px solid #000 !important;
+            padding: 4px 6px !important;
             text-align: left;
             word-wrap: break-word;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            overflow: visible;
+            white-space: normal;
         }
         #report-print-content th {
-            background-color: #f0f0f0;
+            background-color: #f0f0f0 !important;
             font-weight: bold;
+        }
+        /* Адаптация для мобильных устройств */
+        @media (max-width: 600px) {
+            #report-print-content table {
+                font-size: 7pt;
+            }
+            #report-print-content th, #report-print-content td {
+                padding: 2px 3px !important;
+                font-size: 7pt;
+            }
+            #report-print-content .report-title {
+                font-size: 16pt;
+            }
+        }
+        @media print {
+            body, html {
+                margin: 0;
+                padding: 0;
+                width: 100%;
+                height: 100%;
+            }
+            #report-print-content {
+                padding: 5px;
+            }
+            .no-print { display: none; }
         }
     `;
     document.head.appendChild(style);
@@ -1916,13 +1945,11 @@ function printReport() {
     printDiv.style.display = 'block';
     document.body.appendChild(printDiv);
 
-    // Заголовок
     const title = document.createElement('div');
     title.className = 'report-title';
     title.textContent = cabinetName ? `Аудитория: ${cabinetName}` : 'Общий отчёт по инвентаризации';
     printDiv.appendChild(title);
 
-    // Таблица (без colgroup, чтобы колонки сами распределялись)
     let tableHtml = `<table>
         <thead><tr>
             <th>Инв. номер</th>
