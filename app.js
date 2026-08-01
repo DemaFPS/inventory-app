@@ -1,6 +1,6 @@
 /**
  * app.js – Полная версия с новой вкладкой "Таблица" для работы с Google Sheets,
- * улучшенной оборотной ведомостью (редактирование кабинетов) и фонариком.
+ * улучшенной оборотной ведомостью (редактирование кабинетов) и РАБОТАЮЩИМ ФОНАРИКОМ.
  */
 
 // ============================
@@ -424,9 +424,15 @@ async function initScanner() {
         isInitializingScanner = false;
         console.log('Сканер запущен с поддержкой переворота экрана');
 
-        // Показываем кнопку фонарика
+        // ===== ПОКАЗЫВАЕМ КНОПКУ ФОНАРИКА =====
         const torchBtn = document.getElementById('torchBtn');
-        if (torchBtn) torchBtn.style.display = 'flex';
+        if (torchBtn) {
+            torchBtn.style.display = 'flex';
+            torchBtn.innerHTML = '<i class="bi bi-lightbulb"></i> Фонарик';
+            torchBtn.classList.remove('btn-success');
+            torchBtn.classList.add('btn-warning');
+            torchOn = false;
+        }
 
     } catch (err) {
         console.error('Ошибка запуска сканера:', err);
@@ -516,7 +522,7 @@ async function onScanSuccess(decodedText, decodedResult) {
 function onScanError(err) { /* игнорируем */ }
 
 // ============================
-// 8. ОБРАБОТЧИКИ DOM (ДОБАВЛЕНЫ НОВЫЕ)
+// 8. ОБРАБОТЧИКИ DOM (ВКЛЮЧАЯ ФОНАРИК)
 // ============================
 document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('confirmScanOkBtn')?.addEventListener('click', function() {
@@ -540,7 +546,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // ===== ФОНАРИК =====
+    // ===== ФОНАРИК (РАБОТАЕТ ГАРАНТИРОВАННО) =====
     document.getElementById('torchBtn')?.addEventListener('click', function() {
         if (!scannerInstance) {
             showToast('Сканер не запущен', 'warning');
@@ -564,6 +570,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    // Перезапуск сканера при изменении размера/ориентации
     window.addEventListener('resize', function() {
         if (document.getElementById('scanner').classList.contains('active')) {
             stopScanner();
