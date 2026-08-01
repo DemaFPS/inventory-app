@@ -41,40 +41,12 @@
             font-size: 0.75rem;
             padding: 0.15rem 0.4rem;
             border-radius: 12px;
-        }
-        #dataTableContainer {
-            border-radius: 8px;
+            background: var(--color-card-bg);
             border: 1px solid var(--divider);
-            background: var(--color-card-bg);
-            position: relative;
-            overflow: hidden;
+            color: var(--color-text);
         }
-        #dataTable {
-            margin-bottom: 0;
-            width: 100%;
-            border-collapse: collapse;
-        }
-        #dataTable th {
-            position: sticky;
-            top: 0;
-            background: var(--color-card-bg);
-            z-index: 2;
-            border-bottom: 2px solid var(--divider);
-            padding: 0.4rem 0.3rem;
-            font-size: 0.8rem;
-        }
-        #dataTable td {
-            padding: 0.2rem 0.3rem;
-            font-size: 0.8rem;
-            border-bottom: 1px solid rgba(0,0,0,0.05);
-        }
-        #dataTable td:focus {
+        .column-filter:focus {
             outline: 2px solid var(--color-primary);
-            background: #fff;
-        }
-        .row-selector {
-            transform: scale(1.1);
-            cursor: pointer;
         }
         .table-controls {
             display: flex;
@@ -87,11 +59,27 @@
             font-size: 0.9rem;
             padding: 0.2rem 0.6rem;
             border-radius: 20px;
+            background: var(--color-card-bg);
+            border: 1px solid var(--divider);
+            color: var(--color-text);
         }
         .table-controls .btn {
             font-size: 0.85rem;
             padding: 0.2rem 0.8rem;
             border-radius: 20px;
+        }
+        .row-selector {
+            transform: scale(1.1);
+            cursor: pointer;
+        }
+        #dataTable td {
+            padding: 0.2rem 0.3rem;
+            font-size: 0.8rem;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+        }
+        #dataTable td:focus {
+            outline: 2px solid var(--color-primary);
+            background: #fff;
         }
         [data-theme="dark"] #dataTable td:focus {
             background: #2d2d3f;
@@ -104,15 +92,21 @@
         [data-theme="dark"] #dataTableContainer {
             border-color: rgba(255,255,255,0.1);
         }
-        /* Для компактности на мобильных */
+        [data-theme="dark"] .table-controls .form-control {
+            background: #2d2d3f;
+            color: #e0e0e0;
+            border-color: rgba(255,255,255,0.1);
+        }
+        [data-theme="dark"] .column-filter {
+            background: #2d2d3f;
+            color: #e0e0e0;
+            border-color: rgba(255,255,255,0.1);
+        }
         @media (max-width: 576px) {
             .column-filter {
                 min-width: 60px;
                 max-width: 100px;
                 font-size: 0.7rem;
-            }
-            #filterContainer .col-auto {
-                flex: 0 0 auto;
             }
             .table-controls .btn {
                 font-size: 0.75rem;
@@ -408,7 +402,7 @@
                 <!-- Контейнер для фильтров (выпадающие списки по столбцам) -->
                 <div id="filterContainer" class="row g-1 mb-2"></div>
 
-                <!-- Таблица с виртуальным скроллом -->
+                <!-- Таблица с виртуальным скроллом (упрощённая версия без виртуализации) -->
                 <div id="dataTableContainer" style="max-height: 60vh; overflow: auto; border-radius:8px; border:1px solid var(--divider);">
                     <table class="table table-bordered table-striped table-sm" id="dataTable" style="margin-bottom:0;">
                         <thead id="dataTableHead"></thead>
