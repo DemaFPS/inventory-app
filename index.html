@@ -21,6 +21,105 @@
     <link rel="stylesheet" href="styles.css">
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+
+    <style>
+        /* ===== СТИЛИ ДЛЯ НОВЫХ ЭЛЕМЕНТОВ ТАБЛИЦЫ ===== */
+        #filterContainer {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            max-height: 80px;
+            overflow-y: auto;
+            padding: 4px 0;
+        }
+        #filterContainer .col-auto {
+            flex: 0 0 auto;
+        }
+        .column-filter {
+            min-width: 80px;
+            max-width: 140px;
+            font-size: 0.75rem;
+            padding: 0.15rem 0.4rem;
+            border-radius: 12px;
+        }
+        #dataTableContainer {
+            border-radius: 8px;
+            border: 1px solid var(--divider);
+            background: var(--color-card-bg);
+            position: relative;
+            overflow: hidden;
+        }
+        #dataTable {
+            margin-bottom: 0;
+            width: 100%;
+            border-collapse: collapse;
+        }
+        #dataTable th {
+            position: sticky;
+            top: 0;
+            background: var(--color-card-bg);
+            z-index: 2;
+            border-bottom: 2px solid var(--divider);
+            padding: 0.4rem 0.3rem;
+            font-size: 0.8rem;
+        }
+        #dataTable td {
+            padding: 0.2rem 0.3rem;
+            font-size: 0.8rem;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+        }
+        #dataTable td:focus {
+            outline: 2px solid var(--color-primary);
+            background: #fff;
+        }
+        .row-selector {
+            transform: scale(1.1);
+            cursor: pointer;
+        }
+        .table-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+        .table-controls .form-control {
+            font-size: 0.9rem;
+            padding: 0.2rem 0.6rem;
+            border-radius: 20px;
+        }
+        .table-controls .btn {
+            font-size: 0.85rem;
+            padding: 0.2rem 0.8rem;
+            border-radius: 20px;
+        }
+        [data-theme="dark"] #dataTable td:focus {
+            background: #2d2d3f;
+            color: #fff;
+        }
+        [data-theme="dark"] #dataTable th {
+            background: #1e1e1e;
+            border-bottom-color: rgba(255,255,255,0.1);
+        }
+        [data-theme="dark"] #dataTableContainer {
+            border-color: rgba(255,255,255,0.1);
+        }
+        /* Для компактности на мобильных */
+        @media (max-width: 576px) {
+            .column-filter {
+                min-width: 60px;
+                max-width: 100px;
+                font-size: 0.7rem;
+            }
+            #filterContainer .col-auto {
+                flex: 0 0 auto;
+            }
+            .table-controls .btn {
+                font-size: 0.75rem;
+                padding: 0.15rem 0.5rem;
+            }
+        }
+    </style>
 </head>
 <body>
 
@@ -269,10 +368,11 @@
             </div>
         </div>
 
-        <!-- ЭКРАН 7: ТАБЛИЦА (НОВЫЙ) -->
+        <!-- ===== ЭКРАН 7: ТАБЛИЦА (РАСШИРЕННАЯ) ===== -->
         <div id="data" class="screen">
             <div class="container-fluid p-3">
-                <div class="d-flex align-items-center mb-3">
+                <!-- Верхняя панель -->
+                <div class="d-flex align-items-center mb-2">
                     <button id="backFromData" class="btn btn-outline-secondary btn-sm me-2">
                         <i class="bi bi-arrow-left"></i>
                     </button>
@@ -281,16 +381,36 @@
                         <i class="bi bi-arrow-clockwise"></i>
                     </button>
                 </div>
-                <div class="mb-3">
-                    <label for="sheetSelect" class="form-label">Выберите лист</label>
+
+                <!-- Выбор листа -->
+                <div class="mb-2">
+                    <label for="sheetSelect" class="form-label">Лист</label>
                     <select id="sheetSelect" class="form-select">
                         <option value="Inventory">Inventory</option>
                         <option value="Checklists">Checklists</option>
                         <option value="History">History</option>
                     </select>
                 </div>
-                <div id="dataTableContainer" style="max-height: 60vh; overflow: auto;">
-                    <table class="table table-bordered table-striped table-sm" id="dataTable">
+
+                <!-- Панель управления: поиск + кнопки -->
+                <div class="table-controls">
+                    <div class="flex-fill" style="min-width: 120px;">
+                        <input type="text" id="tableSearchInput" class="form-control" placeholder="🔍 Поиск по всем столбцам">
+                    </div>
+                    <button id="addRowBtn" class="btn btn-success">
+                        <i class="bi bi-plus-lg"></i> Добавить
+                    </button>
+                    <button id="deleteRowsBtn" class="btn btn-danger">
+                        <i class="bi bi-trash"></i> Удалить
+                    </button>
+                </div>
+
+                <!-- Контейнер для фильтров (выпадающие списки по столбцам) -->
+                <div id="filterContainer" class="row g-1 mb-2"></div>
+
+                <!-- Таблица с виртуальным скроллом -->
+                <div id="dataTableContainer" style="max-height: 60vh; overflow: auto; border-radius:8px; border:1px solid var(--divider);">
+                    <table class="table table-bordered table-striped table-sm" id="dataTable" style="margin-bottom:0;">
                         <thead id="dataTableHead"></thead>
                         <tbody id="dataTableBody"></tbody>
                     </table>
@@ -454,7 +574,7 @@
                         <li><strong>Если устройство не найдено</strong> – при наличии интернета будет предложено создать новое устройство. При отсутствии интернета сканирование сохранится в журнал.</li>
                         <li><strong>Карточка</strong> – показывает все данные. Кнопки внизу позволяют изменить статус, передать сотруднику, отправить в ремонт, на склад или списать.</li>
                         <li><strong>Оборотная ведомость</strong> – выберите кабинет, увидите список инвентарных номеров с индикацией наличия. Нажмите «Редактировать» для добавления/удаления номеров.</li>
-                        <li><strong>Таблица</strong> – просматривайте и редактируйте данные любых листов Google Sheets прямо в приложении.</li>
+                        <li><strong>Таблица</strong> – просматривайте и редактируйте данные любых листов Google Sheets прямо в приложении. Используйте поиск, фильтры по каждому столбцу, добавление и удаление строк.</li>
                         <li><strong>Отчёт</strong> – выгрузите данные в CSV или распечатайте (PDF). Можно отфильтровать по кабинету.</li>
                         <li><strong>Офлайн-режим</strong> – при отсутствии интернета все сканирования и изменения сохраняются в телефоне. После восстановления связи они автоматически синхронизируются.</li>
                         <li><strong>Логи</strong> – на вкладке «Логи» можно просмотреть все отложенные операции, вручную запустить синхронизацию или создать устройство из нераспознанного штрих-кода.</li>
