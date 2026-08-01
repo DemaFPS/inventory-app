@@ -1,7 +1,9 @@
 /**
  * app.js – Полная версия с работающим фонариком, расширенной таблицей,
  * добавлением аудитории при создании, отображением аудитории на карточке,
- * скрытием комментария в истории перемещений (на карточке).
+ * скрытием комментария в истории перемещений (на карточке),
+ * возможностью добавить комментарий при редактировании,
+ * корректным обновлением аудитории (с синхронизацией Checklists).
  * Адаптировано под новую структуру листа Inventory (колонка "Аудитория").
  */
 
@@ -24,7 +26,7 @@ const auth = firebase.auth();
 // ============================
 // 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbzyACDnbqwR-OgpiH4PamMbp7FMdx_kl467drJ3UhHfSKXagthmZoptu6eReX9vg-37/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbxHN_nunw2862QvX7hknyFfqd_APAJg4OjPszbg2tQJNN_Bfy0gD-gubm_kdVuqYT2o/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -126,6 +128,16 @@ function showScreen(screenId) {
 
 function formatDate(dateStr) {
     if (!dateStr) return '—';
+    // Если строка уже в формате ДД.ММ.ГГГГ, возвращаем как есть
+    if (/^\d{2}\.\d{2}\.\d{4}$/.test(dateStr)) return dateStr;
+    // Пытаемся распарсить и отформатировать
+    const date = parseDateFromString(dateStr);
+    if (date) {
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = date.getFullYear();
+        return `${day}.${month}.${year}`;
+    }
     return String(dateStr);
 }
 
@@ -841,6 +853,28 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+
+    // Заполняем селект аудиторий в модалке редактирования при открытии
+    const editModal = document.getElementById('editModal');
+    if (editModal) {
+        editModal.addEventListener('show.bs.modal', function() {
+            const select = document.getElementById('editCabinet');
+            if (select) {
+                select.innerHTML = '<option value="">— Не выбрана —</option>';
+                cabinetsData.forEach(cab => {
+                    if (cab && cab.cabinet) {
+                        const opt = document.createElement('option');
+                        opt.value = cab.cabinet;
+                        opt.textContent = cab.cabinet;
+                        if (currentDevice && currentDevice.cabinet === cab.cabinet) {
+                            opt.selected = true;
+                        }
+                        select.appendChild(opt);
+                    }
+                });
+            }
+        });
+    }
 });
 
 // ============================
@@ -932,13 +966,13 @@ async function renderDeviceCard(device) {
     };
 
     setText('deviceInventory', 'Инв. № ' + (device.inventoryNumber || ''));
-    setText('deviceCabinet', device.cabinet || '—'); // новая строка
+    setText('deviceCabinet', device.cabinet || '—');
     setText('deviceModel', device.model || '—');
     setText('deviceSerial', device.serialNumber || '—');
     setText('deviceStatus', device.status || '—');
     setText('deviceResponsible', device.responsiblePerson || '—');
     setText('deviceWarranty', formatDate(device.warrantyEndDate));
-    setText('deviceLastModified', device.lastModified || '—');
+    setText('deviceLastModified', formatDate(device.lastModified));
     setText('deviceInitiator', device.initiator || '—');
 
     const historyContainer = document.getElementById('deviceHistory');
@@ -1038,7 +1072,37 @@ async function performDeviceAction(action, data = {}) {
             if (data.responsiblePerson !== undefined) updates.responsiblePerson = data.responsiblePerson;
             if (data.warrantyEndDate) updates.warrantyEndDate = data.warrantyEndDate;
             if (data.status) updates.status = data.status;
-            if (data.cabinet !== undefined) updates.cabinet = data.cabinet; // добавим возможность редактировать аудиторию
+            if (data.cabinet !== undefined) {
+                const oldCabinet = currentDevice.cabinet || '';
+                const newCabinet = data.cabinet;
+                if (oldCabinet !== newCabinet) {
+                    // Обновляем аудиторию в списке
+                    updates.cabinet = newCabinet;
+                    // Обновляем старую аудиторию (удаляем номер)
+                    if (oldCabinet) {
+                        const oldCab = cabinetsData.find(c => c.cabinet === oldCabinet);
+                        if (oldCab) {
+                            let numbers = oldCab.inventoryNumbers.filter(n => n !== inv);
+                            await updateCabinetList(oldCabinet, numbers);
+                            const idx = cabinetsData.findIndex(c => c.cabinet === oldCabinet);
+                            if (idx !== -1) cabinetsData[idx].inventoryNumbers = numbers;
+                        }
+                    }
+                    // Обновляем новую аудиторию (добавляем номер)
+                    if (newCabinet) {
+                        const newCab = cabinetsData.find(c => c.cabinet === newCabinet);
+                        let numbers = newCab ? newCab.inventoryNumbers : [];
+                        if (!numbers.includes(inv)) {
+                            numbers.push(inv);
+                            await updateCabinetList(newCabinet, numbers);
+                            const idx = cabinetsData.findIndex(c => c.cabinet === newCabinet);
+                            if (idx !== -1) cabinetsData[idx].inventoryNumbers = numbers;
+                            else cabinetsData.push({ cabinet: newCabinet, inventoryNumbers: numbers });
+                        }
+                    }
+                    localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
+                }
+            }
             actionDescription = 'Отредактированы данные';
             comment = data.comment || 'без комментария';
             newHistoryEntry = `${timestamp} Отредактированы данные (${comment})`;
@@ -1886,28 +1950,9 @@ document.addEventListener('DOMContentLoaded', async function() {
             document.getElementById('editResponsible').value = currentDevice.responsiblePerson || '';
             document.getElementById('editWarranty').value = currentDevice.warrantyEndDate || '';
             document.getElementById('editStatus').value = currentDevice.status || 'В эксплуатации';
-            // Добавим поле для аудитории в модалку редактирования
-            let editCabinetSelect = document.getElementById('editCabinet');
-            if (!editCabinetSelect) {
-                // Если поля нет, создадим его
-                const container = document.getElementById('editModal').querySelector('.modal-body');
-                const div = document.createElement('div');
-                div.className = 'mb-2';
-                div.innerHTML = `<label>Аудитория</label><select id="editCabinet" class="form-select"><option value="">— Не выбрана —</option></select>`;
-                container.insertBefore(div, container.querySelector('#editModel').parentElement.nextSibling);
-                editCabinetSelect = document.getElementById('editCabinet');
-            }
-            // Заполняем селект аудиториями
-            editCabinetSelect.innerHTML = '<option value="">— Не выбрана —</option>';
-            cabinetsData.forEach(cab => {
-                if (cab && cab.cabinet) {
-                    const opt = document.createElement('option');
-                    opt.value = cab.cabinet;
-                    opt.textContent = cab.cabinet;
-                    if (cab.cabinet === currentDevice.cabinet) opt.selected = true;
-                    editCabinetSelect.appendChild(opt);
-                }
-            });
+            // Очищаем поле комментария
+            document.getElementById('editComment').value = '';
+            // Заполнение селекта аудитории происходит при открытии модалки (событие show.bs.modal)
             const modal = new bootstrap.Modal(document.getElementById('editModal'));
             modal.show();
         });
@@ -1919,11 +1964,12 @@ document.addEventListener('DOMContentLoaded', async function() {
             const warranty = document.getElementById('editWarranty').value.trim();
             const status = document.getElementById('editStatus').value;
             const cabinet = document.getElementById('editCabinet')?.value || '';
+            const comment = document.getElementById('editComment')?.value.trim() || '';
             if (warranty && !/^\d{2}\.\d{2}\.\d{4}$/.test(warranty)) {
                 showToast('Неверный формат даты (ДД.ММ.ГГГГ)', 'danger');
                 return;
             }
-            const updates = { model, serialNumber: serial, responsiblePerson: responsible, warrantyEndDate: warranty, status, cabinet };
+            const updates = { model, serialNumber: serial, responsiblePerson: responsible, warrantyEndDate: warranty, status, cabinet, comment };
             const modal = bootstrap.Modal.getInstance(document.getElementById('editModal'));
             if (modal) modal.hide();
             await performDeviceAction('edit', updates);

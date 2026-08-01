@@ -496,7 +496,7 @@
         </div>
     </div>
 
-    <!-- Модалка редактирования -->
+    <!-- Модалка редактирования (с добавленным полем комментария) -->
     <div class="modal fade" id="editModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
@@ -508,6 +508,8 @@
                     <div class="mb-2"><label>Ответственное лицо</label><input id="editResponsible" class="form-control" placeholder="ФИО"></div>
                     <div class="mb-2"><label>Дата окончания гарантии (ДД.ММ.ГГГГ)</label><input id="editWarranty" class="form-control" placeholder="01.01.2026"></div>
                     <div class="mb-2"><label>Статус</label><select id="editStatus" class="form-select"><option value="В эксплуатации">В эксплуатации</option><option value="В ремонте">В ремонте</option><option value="На складе">На складе</option><option value="Списан">Списан</option></select></div>
+                    <!-- НОВОЕ ПОЛЕ для комментария -->
+                    <div class="mb-2"><label>Комментарий</label><textarea id="editComment" class="form-control" rows="2" placeholder="Причина редактирования (необязательно)"></textarea></div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
