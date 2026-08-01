@@ -1,7 +1,12 @@
 /**
- * app.js – Исправленная версия
- * - В карточке устройства показывается только последнее событие в истории.
- * - В ведомости после сохранения данные обновляются с сервера.
+ * app.js – Полная версия
+ * - Работающий фонарик
+ * - Расширенная таблица (поиск, фильтры, редактирование ячеек, добавление/удаление строк)
+ * - Оборотная ведомость с редактированием и кнопкой «Редактировать»
+ * - Автосохранение при добавлении номера в ведомость
+ * - В карточке устройства – только последнее событие истории
+ * - Форматирование дат в ДД.ММ.ГГГГ
+ * - Отчёт с компактной печатью
  */
 
 // ============================
@@ -23,7 +28,7 @@ const auth = firebase.auth();
 // ============================
 // 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwBbkVP-gFgGnBeETXRPhQIkm25Iaj3j_lFEqjc6yFDe308TuFP-bw_6Un40D_N9wuH/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwfiDf4kbT20AL4wh0lEEqyPBjsFrAf9soTRg8_anbNOsWWtS_VEg9vN2z7h06r_vOS/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -344,9 +349,7 @@ async function addDevice(deviceData) {
     }
 }
 
-// ============================
-// 5. ФУНКЦИИ ДЛЯ ТАБЛИЦЫ
-// ============================
+// ===== ФУНКЦИИ ДЛЯ ТАБЛИЦЫ =====
 async function getSheetData(sheetName) {
     try {
         const result = await callProxy('getSheetData', { sheetName });
@@ -383,7 +386,7 @@ async function updateCabinetList(cabinetName, inventoryNumbers) {
 }
 
 // ============================
-// 6. ДАШБОРД
+// 5. ДАШБОРД
 // ============================
 function updateDashboardStats() {
     const total = inventoryData.length;
@@ -415,7 +418,7 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 7. СКАНЕР
+// 6. СКАНЕР (С ПОДДЕРЖКОЙ ПЕРЕВОРОТА ЭКРАНА И ФОНАРИКА)
 // ============================
 async function initScanner() {
     if (isInitializingScanner) return;
@@ -549,7 +552,7 @@ function stopScanner() {
 }
 
 // ============================
-// 8. ОБРАБОТКА СКАНИРОВАНИЯ
+// 7. ОБРАБОТКА РЕЗУЛЬТАТА СКАНИРОВАНИЯ
 // ============================
 async function onScanSuccess(decodedText, decodedResult) {
     if (!decodedText) return;
@@ -584,7 +587,7 @@ async function onScanSuccess(decodedText, decodedResult) {
 function onScanError(err) { /* игнорируем */ }
 
 // ============================
-// 9. ОБРАБОТЧИКИ DOM
+// 8. ОБРАБОТЧИКИ DOM
 // ============================
 document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('confirmScanOkBtn')?.addEventListener('click', function() {
@@ -716,7 +719,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    document.getElementById('addChecklistItemBtn')?.addEventListener('click', function() {
+    document.getElementById('addChecklistItemBtn')?.addEventListener('click', async function() {
         const input = document.getElementById('newChecklistItemInput');
         if (!input || !input.value.trim()) {
             showToast('Введите инвентарный номер', 'warning');
@@ -727,6 +730,12 @@ document.addEventListener('DOMContentLoaded', function() {
             showToast('Неверный формат номера (6-20 символов)', 'danger');
             return;
         }
+        const cabinet = document.getElementById('cabinetSelect')?.value;
+        if (!cabinet) {
+            showToast('Аудитория не выбрана', 'warning');
+            return;
+        }
+        // Проверяем, есть ли уже такой номер в списке (в DOM)
         const existingItems = document.querySelectorAll('#checklistItems .list-group-item span');
         for (let span of existingItems) {
             if (span.textContent.trim() === num) {
@@ -734,44 +743,69 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
         }
-        const container = document.getElementById('checklistItems');
-        const newItem = document.createElement('div');
-        newItem.className = 'list-group-item d-flex justify-content-between align-items-center list-group-item-light';
-        const exists = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(num));
-        let controls = '';
-        if (isChecklistEditMode) {
-            controls = `
+        // Получаем текущие номера из DOM
+        const items = document.querySelectorAll('#checklistItems .list-group-item');
+        const currentNumbers = [];
+        items.forEach(item => {
+            const span = item.querySelector('span');
+            if (span) {
+                const n = span.textContent.trim();
+                if (n) currentNumbers.push(n);
+            }
+        });
+        // Добавляем новый номер
+        currentNumbers.push(num);
+        try {
+            await updateCabinetList(cabinet, currentNumbers);
+            // Обновляем локальный кэш
+            const cabIdx = cabinetsData.findIndex(c => c.cabinet === cabinet);
+            if (cabIdx !== -1) {
+                cabinetsData[cabIdx].inventoryNumbers = currentNumbers;
+                localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
+            }
+            // Добавляем элемент в DOM
+            const container = document.getElementById('checklistItems');
+            const newItem = document.createElement('div');
+            newItem.className = 'list-group-item d-flex justify-content-between align-items-center list-group-item-light';
+            const exists = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(num));
+            let controls = '';
+            if (isChecklistEditMode) {
+                controls = `
+                    <div>
+                        <input type="checkbox" class="form-check-input me-2 checklist-item-checkbox" data-inv="${num}">
+                        <button class="btn btn-sm btn-outline-danger remove-checklist-item" data-inv="${num}" title="Удалить номер">
+                            <i class="bi bi-x-lg"></i>
+                        </button>
+                    </div>
+                `;
+            }
+            newItem.innerHTML = `
                 <div>
-                    <input type="checkbox" class="form-check-input me-2 checklist-item-checkbox" data-inv="${num}">
-                    <button class="btn btn-sm btn-outline-danger remove-checklist-item" data-inv="${num}" title="Удалить номер">
-                        <i class="bi bi-x-lg"></i>
-                    </button>
+                    ${controls}
+                    <span>${num}</span>
                 </div>
+                <span class="badge bg-${exists ? 'success' : 'warning'}">${exists ? '✓ Найдено' : '❓ Не найдено'}</span>
             `;
-        }
-        newItem.innerHTML = `
-            <div>
-                ${controls}
-                <span>${num}</span>
-            </div>
-            <span class="badge bg-${exists ? 'success' : 'warning'}">${exists ? '✓ Найдено' : '❓ Не найдено'}</span>
-        `;
-        container.appendChild(newItem);
-        input.value = '';
-        showToast('Номер добавлен в список', 'success');
-        updateChecklistProgress();
-        const removeBtn = newItem.querySelector('.remove-checklist-item');
-        if (removeBtn) {
-            removeBtn.addEventListener('click', function(e) {
-                e.stopPropagation();
-                const invNum = this.dataset.inv;
-                const item = this.closest('.list-group-item');
-                if (item) {
-                    item.remove();
-                    showToast(`Номер ${invNum} удалён из списка`, 'info');
-                    updateChecklistProgress();
-                }
-            });
+            container.appendChild(newItem);
+            input.value = '';
+            showToast('Номер добавлен и сохранён', 'success');
+            updateChecklistProgress();
+            // Вешаем обработчик на кнопку удаления
+            const removeBtn = newItem.querySelector('.remove-checklist-item');
+            if (removeBtn) {
+                removeBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    const invNum = this.dataset.inv;
+                    const item = this.closest('.list-group-item');
+                    if (item) {
+                        item.remove();
+                        showToast(`Номер ${invNum} удалён из списка`, 'info');
+                        updateChecklistProgress();
+                    }
+                });
+            }
+        } catch (e) {
+            showToast('Ошибка сохранения: ' + e.message, 'danger');
         }
     });
 
@@ -888,7 +922,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // ============================
-// 10. ОБРАБОТКА ШТРИХ-КОДА
+// 9. ОБРАБОТКА ПОДТВЕРЖДЁННОГО ШТРИХ-КОДА
 // ============================
 async function processScannedBarcode(rawText) {
     const normalized = normalizeInventoryNumber(rawText);
@@ -953,7 +987,7 @@ async function handleManualFind() {
 }
 
 // ============================
-// 11. КАРТОЧКА УСТРОЙСТВА
+// 10. КАРТОЧКА УСТРОЙСТВА
 // ============================
 async function loadDeviceHistory(inventoryNumber) {
     try {
@@ -1008,7 +1042,7 @@ async function renderDeviceCard(device) {
 }
 
 // ============================
-// 12. ДЕЙСТВИЯ С УСТРОЙСТВОМ
+// 11. ДЕЙСТВИЯ С УСТРОЙСТВОМ
 // ============================
 async function performDeviceAction(action, data = {}) {
     if (!currentDevice) {
@@ -1160,7 +1194,7 @@ function removePendingAction(inventoryNumber) {
 }
 
 // ============================
-// 13. ОБОРОТНАЯ ВЕДОМОСТЬ
+// 12. ОБОРОТНАЯ ВЕДОМОСТЬ
 // ============================
 let isChecklistEditMode = false;
 
@@ -1253,6 +1287,7 @@ function renderChecklist(cabinetName) {
     document.getElementById('progressBar').textContent = percent + '%';
     document.getElementById('progressBar').setAttribute('aria-valuenow', percent);
 
+    // Показываем кнопку "Редактировать", если режим редактирования выключен
     document.getElementById('editChecklistBtn').style.display = 'inline-block';
     document.getElementById('saveChecklistBtn').style.display = 'none';
     document.getElementById('checklistEditControls').style.display = 'none';
@@ -1261,6 +1296,7 @@ function renderChecklist(cabinetName) {
         document.getElementById('editChecklistBtn').style.display = 'none';
         document.getElementById('saveChecklistBtn').style.display = 'inline-block';
         document.getElementById('checklistEditControls').style.display = 'grid';
+        // Вешаем обработчики на кнопки удаления
         document.querySelectorAll('.remove-checklist-item').forEach(btn => {
             btn.addEventListener('click', function(e) {
                 e.stopPropagation();
@@ -1293,7 +1329,7 @@ function updateChecklistProgress() {
 }
 
 // ============================
-// 14. ТАБЛИЦА (вкладка)
+// 13. ТАБЛИЦА (вкладка)
 // ============================
 async function loadSheetData(sheetName) {
     currentSheet = sheetName;
@@ -1413,7 +1449,7 @@ function renderTable(data) {
 }
 
 // ============================
-// 15. ОФЛАЙН-РЕЖИМ
+// 14. ОФЛАЙН-РЕЖИМ
 // ============================
 function savePendingScan(inventoryNumber, type = 'barcode') {
     let pending = JSON.parse(localStorage.getItem('pendingScans') || '[]');
@@ -1528,7 +1564,7 @@ async function syncPendingData() {
 }
 
 // ============================
-// 16. ЛОГИ
+// 15. ЛОГИ
 // ============================
 function renderLogs() {
     const container = document.getElementById('logsList');
@@ -1601,7 +1637,7 @@ window.createFromLog = function(inventoryNumber) {
 };
 
 // ============================
-// 17. МОДАЛКА СОЗДАНИЯ
+// 16. МОДАЛКА СОЗДАНИЯ
 // ============================
 function showCreateDeviceModal(inventoryNumber) {
     document.getElementById('createInventoryNumber').value = inventoryNumber;
@@ -1705,7 +1741,7 @@ async function confirmCreateDevice() {
 }
 
 // ============================
-// 18. ОТЧЁТ
+// 17. ОТЧЁТ
 // ============================
 function generateCSV(data) {
     if (!data || !Array.isArray(data) || data.length === 0) return '';
@@ -1770,7 +1806,7 @@ function printReport() {
     printDiv.style.display = 'none';
     document.body.appendChild(printDiv);
 
-    let tableHtml = `<table class="table table-bordered table-striped" style="font-size:9px; table-layout:auto; width:100%; word-wrap:break-word; border-collapse:collapse;">
+    let tableHtml = `<table class="table table-bordered table-striped" style="font-size:8px; table-layout:auto; width:100%; word-wrap:break-word; border-collapse:collapse;">
         <thead><tr>
             <th style="padding:2px 3px; border:1px solid #000; white-space:nowrap;">Инв. номер</th>
             <th style="padding:2px 3px; border:1px solid #000; white-space:nowrap;">Аудитория</th>
@@ -1783,7 +1819,6 @@ function printReport() {
         </tr></thead><tbody>`;
     filteredData.forEach(d => {
         if (!d) return;
-        // Показываем только последнее событие в истории
         let lastEvent = '';
         if (d.history) {
             const events = d.history.split('; ').filter(s => s.trim());
@@ -1810,7 +1845,7 @@ function printReport() {
 }
 
 // ============================
-// 19. НАВИГАЦИЯ
+// 18. НАВИГАЦИЯ
 // ============================
 let navButtons = [];
 let activePill = null;
@@ -1829,7 +1864,7 @@ function updateActivePill(smooth = true) {
 }
 
 // ============================
-// 20. ИНИЦИАЛИЗАЦИЯ
+// 19. ИНИЦИАЛИЗАЦИЯ
 // ============================
 document.addEventListener('DOMContentLoaded', async function() {
     const forceHideLoading = setTimeout(() => {
