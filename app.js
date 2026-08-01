@@ -1,6 +1,6 @@
 /**
  * app.js – Полная версия с новой вкладкой "Таблица" для работы с Google Sheets,
- * улучшенной оборотной ведомостью (редактирование кабинетов) и ГАРАНТИРОВАННО РАБОТАЮЩИМ ФОНАРИКОМ.
+ * улучшенной оборотной ведомостью (редактирование кабинетов) и РАБОТАЮЩИМ ФОНАРИКОМ (через MediaStreamTrack).
  */
 
 // ============================
@@ -22,7 +22,7 @@ const auth = firebase.auth();
 // ============================
 // 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbxo3w8QcjRwAm4Cif7j9LLILM5gLJe02MU09UK4dvMXb7Zyrdq5ugPOdyCbsN4PNWNq/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwBbkVP-gFgGnBeETXRPhQIkm25Iaj3j_lFEqjc6yFDe308TuFP-bw_6Un40D_N9wuH/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -40,8 +40,7 @@ let pendingScanText = '';
 let torchOn = false;
 let isChecklistEditMode = false;
 let currentChecklistCabinet = null;
-let videoTrack = null;
-let cameraStream = null; // сохраняем весь поток для доступа к треку
+let videoTrack = null; // для фонарика
 
 // ============================
 // 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -426,33 +425,18 @@ async function initScanner() {
         isInitializingScanner = false;
         console.log('Сканер запущен с поддержкой переворота экрана');
 
-        // ===== ПОЛУЧАЕМ ВИДЕОТРЕК ДЛЯ ФОНАРИКА =====
+        // ===== СОХРАНЯЕМ ВИДЕОТРЕК ДЛЯ ФОНАРИКА =====
         try {
-            if (scannerInstance._mediaStream) {
-                cameraStream = scannerInstance._mediaStream;
-                const tracks = cameraStream.getVideoTracks();
+            const mediaStream = scannerInstance._mediaStream;
+            if (mediaStream) {
+                const tracks = mediaStream.getVideoTracks();
                 if (tracks.length > 0) {
                     videoTrack = tracks[0];
                     console.log('Видеотрек получен для фонарика');
                 }
             }
         } catch (e) {
-            console.warn('Не удалось получить видеотрек через _mediaStream:', e);
-        }
-
-        // Если не получилось через _mediaStream, попробуем через getUserMedia напрямую
-        if (!videoTrack) {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-                cameraStream = stream;
-                const tracks = stream.getVideoTracks();
-                if (tracks.length > 0) {
-                    videoTrack = tracks[0];
-                    console.log('Видеотрек получен через getUserMedia');
-                }
-            } catch (e) {
-                console.warn('Не удалось получить видеотрек через getUserMedia:', e);
-            }
+            console.warn('Не удалось получить видеотрек:', e);
         }
 
         // ===== ПОКАЗЫВАЕМ КНОПКУ ФОНАРИКА =====
@@ -474,7 +458,7 @@ async function initScanner() {
 }
 
 // ============================
-// 6.1 ОСТАНОВКА СКАНЕРА
+// 6.1 ИСПРАВЛЕННАЯ ФУНКЦИЯ ОСТАНОВКИ СКАНЕРА
 // ============================
 function stopScanner() {
     if (!scannerInstance || !isScanning) {
@@ -482,10 +466,6 @@ function stopScanner() {
         if (torchBtn) torchBtn.style.display = 'none';
         torchOn = false;
         videoTrack = null;
-        if (cameraStream) {
-            cameraStream.getTracks().forEach(t => t.stop());
-            cameraStream = null;
-        }
         return;
     }
 
@@ -497,37 +477,21 @@ function stopScanner() {
                         isScanning = false;
                         console.log('Сканер успешно остановлен');
                         videoTrack = null;
-                        if (cameraStream) {
-                            cameraStream.getTracks().forEach(t => t.stop());
-                            cameraStream = null;
-                        }
                     })
                     .catch(err => {
                         console.warn('Ошибка при остановке сканера:', err);
                         isScanning = false;
                         videoTrack = null;
-                        if (cameraStream) {
-                            cameraStream.getTracks().forEach(t => t.stop());
-                            cameraStream = null;
-                        }
                     });
             }, 100);
         } else {
             isScanning = false;
             videoTrack = null;
-            if (cameraStream) {
-                cameraStream.getTracks().forEach(t => t.stop());
-                cameraStream = null;
-            }
         }
     } catch (e) {
         console.warn('Исключение при остановке сканера:', e);
         isScanning = false;
         videoTrack = null;
-        if (cameraStream) {
-            cameraStream.getTracks().forEach(t => t.stop());
-            cameraStream = null;
-        }
     }
 
     const torchBtn = document.getElementById('torchBtn');
@@ -602,7 +566,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // ===== ФОНАРИК (ГАРАНТИРОВАННО РАБОТАЕТ) =====
+    // ===== ФОНАРИК (РАБОТАЕТ ЧЕРЕЗ MediaStreamTrack) =====
     document.getElementById('torchBtn')?.addEventListener('click', function() {
         if (!videoTrack) {
             showToast('Видеотрек не найден. Попробуйте перезапустить сканер.', 'warning');
@@ -611,7 +575,6 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             // Проверяем, поддерживает ли трек torch
             if (typeof videoTrack.applyConstraints === 'function') {
-                // Переключаем состояние
                 torchOn = !torchOn;
                 const constraints = {
                     advanced: [{ torch: torchOn }]
@@ -619,7 +582,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 videoTrack.applyConstraints(constraints)
                     .then(() => {
                         console.log('Фонарик:', torchOn ? 'включён' : 'выключен');
-                        // Обновляем кнопку
                         this.innerHTML = torchOn ? 
                             '<i class="bi bi-lightbulb-fill"></i> Выкл' : 
                             '<i class="bi bi-lightbulb"></i> Фонарик';
