@@ -1,6 +1,6 @@
 /**
- * app.js – Полная версия с новой вкладкой "Таблица" для работы с Google Sheets,
- * улучшенной оборотной ведомостью (редактирование кабинетов) и РАБОТАЮЩИМ ФОНАРИКОМ.
+ * app.js – ФИНАЛЬНАЯ ВЕРСИЯ (исправлена ведомость: при добавлении номера, если его нет в инвентаризации, он автоматически создаётся)
+ * Теперь при добавлении номера в ведомость он сразу становится "Найдено".
  */
 
 // ============================
@@ -38,9 +38,14 @@ let localUserName = localStorage.getItem('localUserName') || 'Аноним';
 let isCreating = false;
 let pendingScanText = '';
 let torchOn = false;
-let isChecklistEditMode = false;
-let currentChecklistCabinet = null;
-let videoTrack = null; // для фонарика через applyConstraints
+let torchTrack = null;
+
+// ===== ПЕРЕМЕННЫЕ ДЛЯ ТАБЛИЦЫ =====
+let tableData = [];
+let tableHeaders = [];
+let tableFilteredData = [];
+let currentSheet = 'Inventory';
+let isLoadingTable = false;
 
 // ============================
 // 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -113,13 +118,28 @@ function showScreen(screenId) {
     if (screenId === 'scanner') { initScanner(); } else { stopScanner(); }
     if (screenId === 'dashboard') updateDashboardStats();
     if (screenId === 'logs') renderLogs();
-    if (screenId === 'checklist') renderChecklist(currentChecklistCabinet || document.getElementById('cabinetSelect')?.value);
+    if (screenId === 'checklist') renderChecklist(document.getElementById('cabinetSelect')?.value);
     if (screenId === 'data') loadSheetData(document.getElementById('sheetSelect')?.value || 'Inventory');
     setTimeout(updateActivePill, 50);
 }
 
 function formatDate(dateStr) {
     if (!dateStr) return '—';
+    if (/^\d{2}\.\d{2}\.\d{4}$/.test(dateStr)) return dateStr;
+    const date = new Date(dateStr);
+    if (!isNaN(date.getTime())) {
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = date.getFullYear();
+        return `${day}.${month}.${year}`;
+    }
+    const parsed = parseDateFromString(dateStr);
+    if (parsed) {
+        const day = String(parsed.getDate()).padStart(2, '0');
+        const month = String(parsed.getMonth() + 1).padStart(2, '0');
+        const year = parsed.getFullYear();
+        return `${day}.${month}.${year}`;
+    }
     return String(dateStr);
 }
 
@@ -244,7 +264,7 @@ async function updateDevice(inventoryNumber, updates) {
 }
 
 async function addDevice(deviceData) {
-    const { inventoryNumber, model, serialNumber, status, responsiblePerson, warrantyEndDate } = deviceData;
+    const { inventoryNumber, cabinet, model, serialNumber, status, responsiblePerson, warrantyEndDate } = deviceData;
     if (!inventoryNumber || !validateInventoryNumber(inventoryNumber)) {
         showToast('Неверный инвентарный номер', 'danger');
         throw new Error('Invalid inventory number');
@@ -275,13 +295,20 @@ async function addDevice(deviceData) {
     }
     try {
         const result = await callProxy('add', {
-            ...deviceData,
+            inventoryNumber,
+            cabinet: cabinet || '',
+            model: model || '',
+            serialNumber: serialNumber || '',
+            status: status || 'В эксплуатации',
+            responsiblePerson: responsiblePerson || '',
+            warrantyEndDate: warrantyEndDate || '',
             initiator: getInitiatorName()
         });
         showToast(result.message || 'Устройство создано', 'success');
         const now = new Date().toLocaleString('ru-RU');
         const newDevice = {
             inventoryNumber: inventoryNumber,
+            cabinet: cabinet || '',
             model: model || '',
             serialNumber: serialNumber || '',
             status: status || 'В эксплуатации',
@@ -294,6 +321,23 @@ async function addDevice(deviceData) {
         inventoryData.push(newDevice);
         localStorage.setItem('inventoryCache', JSON.stringify(inventoryData));
         updateDashboardStats();
+
+        if (cabinet) {
+            const cab = cabinetsData.find(c => c.cabinet === cabinet);
+            let numbers = cab ? cab.inventoryNumbers : [];
+            if (!numbers.includes(inventoryNumber)) {
+                numbers.push(inventoryNumber);
+                await updateCabinetList(cabinet, numbers);
+                const cabIdx = cabinetsData.findIndex(c => c.cabinet === cabinet);
+                if (cabIdx !== -1) {
+                    cabinetsData[cabIdx].inventoryNumbers = numbers;
+                } else {
+                    cabinetsData.push({ cabinet, inventoryNumbers: numbers });
+                }
+                localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
+            }
+        }
+
         return result;
     } catch (error) {
         if (error.message && (error.message.includes('уже существует') || error.message.includes('Duplicate'))) {
@@ -307,7 +351,9 @@ async function addDevice(deviceData) {
     }
 }
 
-// ===== НОВЫЕ ФУНКЦИИ ДЛЯ РАБОТЫ С ТАБЛИЦЕЙ =====
+// ============================
+// 5. ФУНКЦИИ ДЛЯ ТАБЛИЦЫ
+// ============================
 async function getSheetData(sheetName) {
     try {
         const result = await callProxy('getSheetData', { sheetName });
@@ -334,17 +380,17 @@ async function updateSheetCell(sheetName, row, col, value) {
 async function updateCabinetList(cabinetName, inventoryNumbers) {
     try {
         const result = await callProxy('updateChecklist', { cabinet: cabinetName, inventoryNumbers });
-        showToast(result.message || 'Кабинет обновлён', 'success');
+        showToast(result.message || 'Аудитория обновлена', 'success');
         return result;
     } catch (error) {
-        console.error('Ошибка обновления кабинета:', error);
+        console.error('Ошибка обновления аудитории:', error);
         showToast('Ошибка обновления: ' + error.message, 'danger');
         throw error;
     }
 }
 
 // ============================
-// 5. ДАШБОРД
+// 6. ДАШБОРД
 // ============================
 function updateDashboardStats() {
     const total = inventoryData.length;
@@ -376,7 +422,7 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 6. СКАНЕР (С ПОДДЕРЖКОЙ ПЕРЕВОРОТА ЭКРАНА И ФОНАРИКА)
+// 7. СКАНЕР
 // ============================
 async function initScanner() {
     if (isInitializingScanner) return;
@@ -425,28 +471,31 @@ async function initScanner() {
         isInitializingScanner = false;
         console.log('Сканер запущен с поддержкой переворота экрана');
 
-        // ===== ПОЛУЧАЕМ ВИДЕОТРЕК ДЛЯ ФОНАРИКА (если понадобится) =====
+        const torchBtn = document.getElementById('torchBtn');
+        if (torchBtn) torchBtn.style.display = 'flex';
+
         try {
-            const mediaStream = scannerInstance._mediaStream;
-            if (mediaStream) {
-                const tracks = mediaStream.getVideoTracks();
+            const videoElement = readerElement.querySelector('video');
+            if (videoElement && videoElement.srcObject) {
+                const tracks = videoElement.srcObject.getVideoTracks();
                 if (tracks.length > 0) {
-                    videoTrack = tracks[0];
-                    console.log('Видеотрек получен для фонарика (через _mediaStream)');
+                    torchTrack = tracks[0];
+                    if (typeof torchTrack.getCapabilities === 'function') {
+                        const caps = torchTrack.getCapabilities();
+                        if (caps && caps.torch) {
+                            console.log('Фонарик поддерживается');
+                        } else {
+                            console.log('Фонарик не поддерживается');
+                            torchTrack = null;
+                        }
+                    } else {
+                        torchTrack = null;
+                    }
                 }
             }
         } catch (e) {
-            console.warn('Не удалось получить видеотрек через _mediaStream:', e);
-        }
-
-        // ===== ПОКАЗЫВАЕМ КНОПКУ ФОНАРИКА =====
-        const torchBtn = document.getElementById('torchBtn');
-        if (torchBtn) {
-            torchBtn.style.display = 'flex';
-            torchBtn.innerHTML = '<i class="bi bi-lightbulb"></i> Фонарик';
-            torchBtn.classList.remove('btn-success');
-            torchBtn.classList.add('btn-warning');
-            torchOn = false;
+            console.warn('Не удалось получить трек для фонарика:', e);
+            torchTrack = null;
         }
 
     } catch (err) {
@@ -457,67 +506,67 @@ async function initScanner() {
     }
 }
 
-// ============================
-// 6.1 ОСТАНОВКА СКАНЕРА
-// ============================
 function stopScanner() {
     if (!scannerInstance || !isScanning) {
         const torchBtn = document.getElementById('torchBtn');
         if (torchBtn) torchBtn.style.display = 'none';
         torchOn = false;
-        videoTrack = null;
+        torchTrack = null;
         return;
     }
 
     try {
+        if (torchOn && torchTrack) {
+            try {
+                torchTrack.applyConstraints({ advanced: [{ torch: false }] });
+                torchOn = false;
+                const torchBtn = document.getElementById('torchBtn');
+                if (torchBtn) {
+                    torchBtn.innerHTML = '<i class="bi bi-lightbulb"></i> Фонарик';
+                    torchBtn.classList.remove('btn-success');
+                    torchBtn.classList.add('btn-warning');
+                }
+            } catch (e) {}
+        }
+
         if (scannerInstance && typeof scannerInstance.stop === 'function') {
             setTimeout(() => {
                 scannerInstance.stop()
                     .then(() => {
                         isScanning = false;
                         console.log('Сканер успешно остановлен');
-                        videoTrack = null;
                     })
                     .catch(err => {
                         console.warn('Ошибка при остановке сканера:', err);
                         isScanning = false;
-                        videoTrack = null;
                     });
             }, 100);
         } else {
             isScanning = false;
-            videoTrack = null;
         }
     } catch (e) {
         console.warn('Исключение при остановке сканера:', e);
         isScanning = false;
-        videoTrack = null;
     }
 
     const torchBtn = document.getElementById('torchBtn');
     if (torchBtn) torchBtn.style.display = 'none';
     torchOn = false;
+    torchTrack = null;
 }
 
 // ============================
-// 7. ОБРАБОТКА РЕЗУЛЬТАТА СКАНИРОВАНИЯ
+// 8. ОБРАБОТКА СКАНИРОВАНИЯ
 // ============================
 async function onScanSuccess(decodedText, decodedResult) {
-    if (!decodedText) {
-        console.warn('Пустой результат сканирования');
-        return;
-    }
-    console.log('Распознано:', decodedText);
+    if (!decodedText) return;
     vibrate(100);
     playBeep(true);
     stopScanner();
 
     const rawText = decodedText.trim();
-    let format = decodedResult?.result?.format || decodedResult?.format || '';
-    console.log('Формат:', format);
 
     if (rawText.startsWith('http://') || rawText.startsWith('https://')) {
-        console.log('QR-ссылка – диалог перехода');
         if (navigator.onLine) {
             const modal = new bootstrap.Modal(document.getElementById('qrLinkModal'));
             document.getElementById('qrLinkText').textContent = rawText;
@@ -542,7 +591,7 @@ async function onScanSuccess(decodedText, decodedResult) {
 function onScanError(err) { /* игнорируем */ }
 
 // ============================
-// 8. ОБРАБОТЧИКИ DOM (ВКЛЮЧАЯ ФОНАРИК)
+// 9. ОБРАБОТЧИКИ DOM
 // ============================
 document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('confirmScanOkBtn')?.addEventListener('click', function() {
@@ -566,59 +615,38 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // ===== ФОНАРИК (РАБОТАЕТ ГАРАНТИРОВАННО) =====
+    // Фонарик
     document.getElementById('torchBtn')?.addEventListener('click', function() {
-        // Сначала пробуем встроенный метод toggleTorch
-        if (scannerInstance && typeof scannerInstance.toggleTorch === 'function') {
-            try {
-                scannerInstance.toggleTorch();
-                torchOn = !torchOn;
+        if (!scannerInstance) {
+            showToast('Сканер не запущен', 'warning');
+            return;
+        }
+        if (!torchTrack) {
+            showToast('Фонарик не поддерживается на этом устройстве', 'warning');
+            return;
+        }
+        try {
+            const newState = !torchOn;
+            torchTrack.applyConstraints({
+                advanced: [{ torch: newState }]
+            }).then(() => {
+                torchOn = newState;
                 this.innerHTML = torchOn ? 
                     '<i class="bi bi-lightbulb-fill"></i> Выкл' : 
                     '<i class="bi bi-lightbulb"></i> Фонарик';
                 this.classList.toggle('btn-warning', !torchOn);
                 this.classList.toggle('btn-success', torchOn);
-                return;
-            } catch (e) {
-                console.warn('toggleTorch не сработал, пробуем applyConstraints:', e);
-            }
-        }
-
-        // Fallback через MediaStreamTrack
-        if (!videoTrack) {
-            showToast('Видеотрек не найден. Попробуйте перезапустить сканер.', 'warning');
-            return;
-        }
-        try {
-            if (typeof videoTrack.applyConstraints === 'function') {
-                torchOn = !torchOn;
-                const constraints = {
-                    advanced: [{ torch: torchOn }]
-                };
-                videoTrack.applyConstraints(constraints)
-                    .then(() => {
-                        console.log('Фонарик (applyConstraints):', torchOn ? 'включён' : 'выключен');
-                        this.innerHTML = torchOn ? 
-                            '<i class="bi bi-lightbulb-fill"></i> Выкл' : 
-                            '<i class="bi bi-lightbulb"></i> Фонарик';
-                        this.classList.toggle('btn-warning', !torchOn);
-                        this.classList.toggle('btn-success', torchOn);
-                    })
-                    .catch(err => {
-                        console.error('Ошибка applyConstraints:', err);
-                        showToast('Ошибка переключения фонарика: ' + err.message, 'danger');
-                        torchOn = !torchOn;
-                    });
-            } else {
-                showToast('Фонарик не поддерживается на этом устройстве', 'warning');
-            }
+                console.log('Фонарик:', torchOn ? 'ВКЛ' : 'ВЫКЛ');
+            }).catch(err => {
+                console.error('Ошибка переключения фонарика:', err);
+                showToast('Ошибка: ' + err.message, 'danger');
+            });
         } catch (e) {
             console.error('Ошибка переключения фонарика:', e);
             showToast('Ошибка: ' + e.message, 'danger');
         }
     });
 
-    // Перезапуск сканера при изменении размера/ориентации
     window.addEventListener('resize', function() {
         if (document.getElementById('scanner').classList.contains('active')) {
             stopScanner();
@@ -639,19 +667,21 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // ===== УЛУЧШЕННАЯ ОБОРОТНАЯ ВЕДОМОСТЬ =====
+    // ===== ОБОРОТНАЯ ВЕДОМОСТЬ =====
     document.getElementById('editChecklistBtn')?.addEventListener('click', function() {
-        if (!currentChecklistCabinet) {
-            showToast('Выберите кабинет', 'warning');
+        const cabinet = document.getElementById('cabinetSelect')?.value;
+        if (!cabinet) {
+            showToast('Выберите аудиторию', 'warning');
             return;
         }
         isChecklistEditMode = true;
-        renderChecklist(currentChecklistCabinet);
+        renderChecklist(cabinet);
     });
 
     document.getElementById('saveChecklistBtn')?.addEventListener('click', async function() {
-        if (!currentChecklistCabinet) {
-            showToast('Кабинет не выбран', 'warning');
+        const cabinet = document.getElementById('cabinetSelect')?.value;
+        if (!cabinet) {
+            showToast('Аудитория не выбрана', 'warning');
             return;
         }
         const items = document.querySelectorAll('#checklistItems .list-group-item');
@@ -671,32 +701,29 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             newItemInput.value = '';
         }
-        const currentCabinet = cabinetsData.find(c => c.cabinet === currentChecklistCabinet);
+        const currentCabinet = cabinetsData.find(c => c.cabinet === cabinet);
         const currentNumbers = currentCabinet ? currentCabinet.inventoryNumbers : [];
         const sortedNew = [...newNumbers].sort();
         const sortedOld = [...currentNumbers].sort();
         if (JSON.stringify(sortedNew) === JSON.stringify(sortedOld)) {
             showToast('Нет изменений', 'info');
             isChecklistEditMode = false;
-            renderChecklist(currentChecklistCabinet);
+            renderChecklist(cabinet);
             return;
         }
         try {
-            await updateCabinetList(currentChecklistCabinet, newNumbers);
-            const cabIdx = cabinetsData.findIndex(c => c.cabinet === currentChecklistCabinet);
-            if (cabIdx !== -1) {
-                cabinetsData[cabIdx].inventoryNumbers = newNumbers;
-                localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
-            }
-            showToast('Кабинет обновлён', 'success');
+            await updateCabinetList(cabinet, newNumbers);
+            await loadInventory();
+            showToast('Аудитория обновлена', 'success');
             isChecklistEditMode = false;
-            renderChecklist(currentChecklistCabinet);
+            renderChecklist(cabinet);
         } catch (e) {
             showToast('Ошибка сохранения: ' + e.message, 'danger');
         }
     });
 
-    document.getElementById('addChecklistItemBtn')?.addEventListener('click', function() {
+    // ИСПРАВЛЕННЫЙ ОБРАБОТЧИК addChecklistItemBtn (с автоматическим созданием устройства)
+    document.getElementById('addChecklistItemBtn')?.addEventListener('click', async function() {
         const input = document.getElementById('newChecklistItemInput');
         if (!input || !input.value.trim()) {
             showToast('Введите инвентарный номер', 'warning');
@@ -707,20 +734,93 @@ document.addEventListener('DOMContentLoaded', function() {
             showToast('Неверный формат номера (6-20 символов)', 'danger');
             return;
         }
+        const cabinet = document.getElementById('cabinetSelect')?.value;
+        if (!cabinet) {
+            showToast('Аудитория не выбрана', 'warning');
+            return;
+        }
+
+        // === ЗАГРУЖАЕМ СВЕЖИЕ ДАННЫЕ С СЕРВЕРА ===
+        await loadInventory(); // обновляем inventoryData и cabinetsData
+
+        // Проверяем, есть ли уже такой номер в списке (в DOM)
+        const existingItems = document.querySelectorAll('#checklistItems .list-group-item span');
+        for (let span of existingItems) {
+            if (span.textContent.trim() === num) {
+                showToast('Такой номер уже есть в списке', 'warning');
+                return;
+            }
+        }
+
+        // Проверяем, есть ли номер в инвентаризации
+        const exists = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(num));
+        if (!exists) {
+            // Если номера нет в инвентаризации, создаём устройство автоматически
+            try {
+                await addDevice({
+                    inventoryNumber: num,
+                    cabinet: cabinet, // передаём аудиторию, чтобы добавить в неё
+                    model: '',
+                    serialNumber: '',
+                    status: 'В эксплуатации',
+                    responsiblePerson: '',
+                    warrantyEndDate: ''
+                });
+                // После создания устройство уже добавлено в inventoryData и cabinetsData
+                // Но addDevice также обновил аудиторию, поэтому номер уже есть в списке.
+                // Мы можем пропустить шаг updateCabinetList, так как addDevice уже сделал это.
+                // Однако мы всё равно должны обновить DOM и прогресс.
+                // Поэтому после создания просто обновим отображение.
+                showToast('Устройство создано и добавлено в аудиторию', 'success');
+            } catch (e) {
+                showToast('Ошибка создания устройства: ' + e.message, 'danger');
+                return;
+            }
+        }
+
+        // Получаем текущие номера из DOM (если устройство создано, то номер уже есть в inventoryData, но в DOM его нет)
+        // Поэтому мы должны добавить номер в DOM в любом случае.
         const container = document.getElementById('checklistItems');
         const newItem = document.createElement('div');
         newItem.className = 'list-group-item d-flex justify-content-between align-items-center list-group-item-light';
-        const exists = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(num));
+        // После создания или проверки статус будет "Найдено", так как номер теперь точно есть в inventoryData
+        const existsNow = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(num));
+        let controls = '';
+        if (isChecklistEditMode) {
+            controls = `
+                <div>
+                    <input type="checkbox" class="form-check-input me-2 checklist-item-checkbox" data-inv="${num}">
+                    <button class="btn btn-sm btn-outline-danger remove-checklist-item" data-inv="${num}" title="Удалить номер">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+            `;
+        }
         newItem.innerHTML = `
             <div>
-                <input type="checkbox" class="form-check-input me-2 checklist-item-checkbox" data-inv="${num}">
+                ${controls}
                 <span>${num}</span>
             </div>
-            <span class="badge bg-${exists ? 'success' : 'warning'}">${exists ? '✓ Найдено' : '❓ Не найдено'}</span>
+            <span class="badge bg-${existsNow ? 'success' : 'warning'}">${existsNow ? '✓ Найдено' : '❓ Не найдено'}</span>
         `;
         container.appendChild(newItem);
         input.value = '';
         showToast('Номер добавлен в список', 'success');
+        updateChecklistProgress();
+        // Вешаем обработчик на кнопку удаления
+        const removeBtn = newItem.querySelector('.remove-checklist-item');
+        if (removeBtn) {
+            removeBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const invNum = this.dataset.inv;
+                const item = this.closest('.list-group-item');
+                if (item) {
+                    item.remove();
+                    showToast(`Номер ${invNum} удалён из списка`, 'info');
+                    updateChecklistProgress();
+                }
+            });
+        }
     });
 
     document.getElementById('removeSelectedChecklistBtn')?.addEventListener('click', function() {
@@ -735,6 +835,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (item) item.remove();
         });
         showToast(`Удалено ${checked.length} элементов`, 'success');
+        updateChecklistProgress();
     });
 
     // ===== ВКЛАДКА "ТАБЛИЦА" =====
@@ -743,6 +844,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     document.getElementById('sheetSelect')?.addEventListener('change', function() {
+        currentSheet = this.value;
         loadSheetData(this.value);
     });
 
@@ -750,10 +852,91 @@ document.addEventListener('DOMContentLoaded', function() {
         const sheet = document.getElementById('sheetSelect').value;
         loadSheetData(sheet);
     });
+
+    document.getElementById('tableSearchInput')?.addEventListener('input', function() {
+        applyFiltersAndSearch();
+    });
+
+    document.getElementById('addRowBtn')?.addEventListener('click', async function() {
+        if (!tableHeaders.length) {
+            showToast('Сначала загрузите данные', 'warning');
+            return;
+        }
+        const newRow = new Array(tableHeaders.length).fill('');
+        const sheet = document.getElementById('sheetSelect').value;
+        try {
+            const result = await callProxy('addRow', { sheetName: sheet, rowData: newRow });
+            showToast(result.message || 'Строка добавлена', 'success');
+            loadSheetData(sheet);
+        } catch (e) {
+            showToast('Ошибка добавления: ' + e.message, 'danger');
+        }
+    });
+
+    document.getElementById('deleteRowsBtn')?.addEventListener('click', async function() {
+        const checked = document.querySelectorAll('.row-selector:checked');
+        if (checked.length === 0) {
+            showToast('Выберите строки для удаления', 'warning');
+            return;
+        }
+        if (!confirm(`Удалить ${checked.length} строк(и)?`)) return;
+        const rowIndices = Array.from(checked).map(cb => parseInt(cb.dataset.sheetRow)).filter(idx => !isNaN(idx) && idx > 0);
+        if (rowIndices.length === 0) {
+            showToast('Не удалось определить номера строк', 'danger');
+            return;
+        }
+        const sheet = document.getElementById('sheetSelect').value;
+        try {
+            const result = await callProxy('deleteRows', { sheetName: sheet, rowIndices: rowIndices });
+            showToast(result.message || 'Строки удалены', 'success');
+            loadSheetData(sheet);
+        } catch (e) {
+            showToast('Ошибка удаления: ' + e.message, 'danger');
+        }
+    });
+
+    const createModal = document.getElementById('createDeviceModal');
+    if (createModal) {
+        createModal.addEventListener('show.bs.modal', function() {
+            const select = document.getElementById('createCabinet');
+            if (select) {
+                select.innerHTML = '<option value="">— Не выбрана —</option>';
+                cabinetsData.forEach(cab => {
+                    if (cab && cab.cabinet) {
+                        const opt = document.createElement('option');
+                        opt.value = cab.cabinet;
+                        opt.textContent = cab.cabinet;
+                        select.appendChild(opt);
+                    }
+                });
+            }
+        });
+    }
+
+    const editModal = document.getElementById('editModal');
+    if (editModal) {
+        editModal.addEventListener('show.bs.modal', function() {
+            const select = document.getElementById('editCabinet');
+            if (select) {
+                select.innerHTML = '<option value="">— Не выбрана —</option>';
+                cabinetsData.forEach(cab => {
+                    if (cab && cab.cabinet) {
+                        const opt = document.createElement('option');
+                        opt.value = cab.cabinet;
+                        opt.textContent = cab.cabinet;
+                        if (currentDevice && currentDevice.cabinet === cab.cabinet) {
+                            opt.selected = true;
+                        }
+                        select.appendChild(opt);
+                    }
+                });
+            }
+        });
+    }
 });
 
 // ============================
-// 9. ОБРАБОТКА ПОДТВЕРЖДЁННОГО ШТРИХ-КОДА
+// 10. ОБРАБОТКА ШТРИХ-КОДА
 // ============================
 async function processScannedBarcode(rawText) {
     const normalized = normalizeInventoryNumber(rawText);
@@ -818,7 +1001,7 @@ async function handleManualFind() {
 }
 
 // ============================
-// 10. КАРТОЧКА УСТРОЙСТВА + ИСТОРИЯ
+// 11. КАРТОЧКА УСТРОЙСТВА
 // ============================
 async function loadDeviceHistory(inventoryNumber) {
     try {
@@ -841,24 +1024,23 @@ async function renderDeviceCard(device) {
     };
 
     setText('deviceInventory', 'Инв. № ' + (device.inventoryNumber || ''));
+    setText('deviceCabinet', device.cabinet || '—');
     setText('deviceModel', device.model || '—');
     setText('deviceSerial', device.serialNumber || '—');
     setText('deviceStatus', device.status || '—');
     setText('deviceResponsible', device.responsiblePerson || '—');
     setText('deviceWarranty', formatDate(device.warrantyEndDate));
-    setText('deviceLastModified', device.lastModified || '—');
+    setText('deviceLastModified', formatDate(device.lastModified));
     setText('deviceInitiator', device.initiator || '—');
 
     const historyContainer = document.getElementById('deviceHistory');
     if (historyContainer) {
-        historyContainer.innerHTML = '<div class="text-muted small">Загрузка истории...</div>';
-        const history = await loadDeviceHistory(device.inventoryNumber);
-        if (history.length === 0) {
-            historyContainer.innerHTML = '<div class="text-muted small">Нет записей</div>';
+        if (device.history) {
+            const events = device.history.split('; ').filter(s => s.trim());
+            const lastEvent = events.length > 0 ? events[events.length - 1] : '';
+            historyContainer.innerHTML = `<div class="small">${lastEvent || 'Нет записей'}</div>`;
         } else {
-            historyContainer.innerHTML = history.map(entry =>
-                `<div class="small">${entry.date} — ${entry.action}${entry.comment ? ' (' + entry.comment + ')' : ''} (${entry.initiator || 'Аноним'})</div>`
-            ).join('');
+            historyContainer.innerHTML = '<div class="text-muted small">Нет записей</div>';
         }
     }
 
@@ -873,7 +1055,7 @@ async function renderDeviceCard(device) {
 }
 
 // ============================
-// 11. ОБРАБОТЧИКИ ДЕЙСТВИЙ
+// 12. ДЕЙСТВИЯ С УСТРОЙСТВОМ
 // ============================
 async function performDeviceAction(action, data = {}) {
     if (!currentDevice) {
@@ -918,7 +1100,7 @@ async function performDeviceAction(action, data = {}) {
             updates.responsiblePerson = data.fio;
             actionDescription = `Передано сотруднику ${data.fio}`;
             comment = data.comment || 'без комментария';
-            newHistoryEntry = `${timestamp} Передано сотруднику ${data.fio} (${comment})`;
+            newHistoryEntry = `${timestamp} Передано сотруднику ${data.fio}`;
             break;
         case 'repair':
             updates.status = 'В ремонте';
@@ -946,6 +1128,34 @@ async function performDeviceAction(action, data = {}) {
             if (data.responsiblePerson !== undefined) updates.responsiblePerson = data.responsiblePerson;
             if (data.warrantyEndDate) updates.warrantyEndDate = data.warrantyEndDate;
             if (data.status) updates.status = data.status;
+            if (data.cabinet !== undefined) {
+                const oldCabinet = currentDevice.cabinet || '';
+                const newCabinet = data.cabinet;
+                if (oldCabinet !== newCabinet) {
+                    updates.cabinet = newCabinet;
+                    if (oldCabinet) {
+                        const oldCab = cabinetsData.find(c => c.cabinet === oldCabinet);
+                        if (oldCab) {
+                            let numbers = oldCab.inventoryNumbers.filter(n => n !== inv);
+                            await updateCabinetList(oldCabinet, numbers);
+                            const idx = cabinetsData.findIndex(c => c.cabinet === oldCabinet);
+                            if (idx !== -1) cabinetsData[idx].inventoryNumbers = numbers;
+                        }
+                    }
+                    if (newCabinet) {
+                        const newCab = cabinetsData.find(c => c.cabinet === newCabinet);
+                        let numbers = newCab ? newCab.inventoryNumbers : [];
+                        if (!numbers.includes(inv)) {
+                            numbers.push(inv);
+                            await updateCabinetList(newCabinet, numbers);
+                            const idx = cabinetsData.findIndex(c => c.cabinet === newCabinet);
+                            if (idx !== -1) cabinetsData[idx].inventoryNumbers = numbers;
+                            else cabinetsData.push({ cabinet: newCabinet, inventoryNumbers: numbers });
+                        }
+                    }
+                    localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
+                }
+            }
             actionDescription = 'Отредактированы данные';
             comment = data.comment || 'без комментария';
             newHistoryEntry = `${timestamp} Отредактированы данные (${comment})`;
@@ -997,12 +1207,14 @@ function removePendingAction(inventoryNumber) {
 }
 
 // ============================
-// 12. ОБОРОТНАЯ ВЕДОМОСТЬ
+// 13. ОБОРОТНАЯ ВЕДОМОСТЬ
 // ============================
+let isChecklistEditMode = false;
+
 async function loadCabinetSelect() {
     const select = document.getElementById('cabinetSelect');
     if (!select) return;
-    select.innerHTML = '<option value="">— Выберите кабинет —</option>';
+    select.innerHTML = '<option value="">— Выберите аудиторию —</option>';
     if (cabinetsData.length === 0) await loadInventory();
     cabinetsData.forEach(cab => {
         if (!cab || !cab.cabinet) return;
@@ -1013,7 +1225,7 @@ async function loadCabinetSelect() {
     });
     const reportFilter = document.getElementById('reportCabinetFilter');
     if (reportFilter) {
-        reportFilter.innerHTML = '<option value="">Все кабинеты</option>';
+        reportFilter.innerHTML = '<option value="">Все аудитории</option>';
         cabinetsData.forEach(cab => {
             if (!cab || !cab.cabinet) return;
             const opt = document.createElement('option');
@@ -1026,7 +1238,7 @@ async function loadCabinetSelect() {
 
 function renderChecklist(cabinetName) {
     if (!cabinetName) {
-        document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Выберите кабинет</div>';
+        document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Выберите аудиторию</div>';
         document.getElementById('progressText').textContent = '0 из 0';
         document.getElementById('progressBar').style.width = '0%';
         document.getElementById('progressBar').textContent = '0%';
@@ -1038,7 +1250,7 @@ function renderChecklist(cabinetName) {
 
     const cabinet = cabinetsData.find(c => c && c.cabinet === cabinetName);
     if (!cabinet) {
-        document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Кабинет не найден</div>';
+        document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Аудитория не найдена</div>';
         document.getElementById('progressText').textContent = '0 из 0';
         document.getElementById('progressBar').style.width = '0%';
         document.getElementById('progressBar').textContent = '0%';
@@ -1047,8 +1259,6 @@ function renderChecklist(cabinetName) {
         document.getElementById('checklistEditControls').style.display = 'none';
         return;
     }
-
-    currentChecklistCabinet = cabinetName;
 
     const invNumbers = Array.isArray(cabinet.inventoryNumbers) ? cabinet.inventoryNumbers : [];
     let found = 0;
@@ -1060,11 +1270,21 @@ function renderChecklist(cabinetName) {
         if (exists) found++;
         const statusClass = exists ? 'list-group-item-success' : 'list-group-item-danger';
         const statusText = exists ? '✓ Найдено' : '✗ Не найдено';
-        const checkBox = isChecklistEditMode ? `<input type="checkbox" class="form-check-input me-2 checklist-item-checkbox" data-inv="${num}">` : '';
+        let controls = '';
+        if (isChecklistEditMode) {
+            controls = `
+                <div>
+                    <input type="checkbox" class="form-check-input me-2 checklist-item-checkbox" data-inv="${num}">
+                    <button class="btn btn-sm btn-outline-danger remove-checklist-item" data-inv="${num}" title="Удалить номер">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+            `;
+        }
         itemsHtml += `
             <div class="list-group-item d-flex justify-content-between align-items-center ${statusClass}">
                 <div>
-                    ${checkBox}
+                    ${controls}
                     <span>${num}</span>
                 </div>
                 <span class="badge bg-${exists ? 'success' : 'danger'}">${statusText}</span>
@@ -1088,74 +1308,163 @@ function renderChecklist(cabinetName) {
         document.getElementById('editChecklistBtn').style.display = 'none';
         document.getElementById('saveChecklistBtn').style.display = 'inline-block';
         document.getElementById('checklistEditControls').style.display = 'grid';
+        document.querySelectorAll('.remove-checklist-item').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const invNum = this.dataset.inv;
+                const item = this.closest('.list-group-item');
+                if (item) {
+                    item.remove();
+                    showToast(`Номер ${invNum} удалён из списка`, 'info');
+                    updateChecklistProgress();
+                }
+            });
+        });
         document.querySelectorAll('.checklist-item-checkbox').forEach(cb => cb.checked = false);
     }
 }
 
+function updateChecklistProgress() {
+    const items = document.querySelectorAll('#checklistItems .list-group-item');
+    let found = 0;
+    items.forEach(item => {
+        const badge = item.querySelector('.badge');
+        if (badge && badge.textContent.includes('✓')) found++;
+    });
+    const total = items.length;
+    document.getElementById('progressText').textContent = `${found} из ${total}`;
+    const percent = total ? Math.round((found / total) * 100) : 0;
+    document.getElementById('progressBar').style.width = percent + '%';
+    document.getElementById('progressBar').textContent = percent + '%';
+    document.getElementById('progressBar').setAttribute('aria-valuenow', percent);
+}
+
 // ============================
-// 13. ЗАГРУЗКА ДАННЫХ ДЛЯ ВКЛАДКИ "ТАБЛИЦА"
+// 14. ТАБЛИЦА (вкладка) с индикатором загрузки
 // ============================
 async function loadSheetData(sheetName) {
+    if (isLoadingTable) return;
+    isLoadingTable = true;
+    currentSheet = sheetName;
     const status = document.getElementById('dataStatus');
-    const tableHead = document.getElementById('dataTableHead');
-    const tableBody = document.getElementById('dataTableBody');
     status.textContent = 'Загрузка...';
     try {
         const data = await getSheetData(sheetName);
         if (!data || data.length === 0) {
-            tableHead.innerHTML = '';
-            tableBody.innerHTML = '<tr><td class="text-muted">Нет данных</td></tr>';
+            tableHeaders = [];
+            tableData = [];
+            tableFilteredData = [];
+            document.getElementById('dataTableHead').innerHTML = '';
+            document.getElementById('dataTableBody').innerHTML = '<tr><td class="text-muted">Нет данных</td></tr>';
             status.textContent = 'Нет данных';
+            document.getElementById('filterContainer').innerHTML = '';
+            isLoadingTable = false;
             return;
         }
-        const headers = data[0];
-        let theadHtml = '<tr>';
-        headers.forEach(h => {
-            theadHtml += `<th>${h}</th>`;
-        });
-        theadHtml += '</tr>';
-        tableHead.innerHTML = theadHtml;
-
-        let tbodyHtml = '';
-        for (let i = 1; i < data.length; i++) {
-            const row = data[i];
-            tbodyHtml += '<tr>';
-            row.forEach((cell, idx) => {
-                tbodyHtml += `<td contenteditable="true" data-row="${i}" data-col="${idx}" data-sheet="${sheetName}">${cell !== undefined && cell !== null ? cell : ''}</td>`;
-            });
-            tbodyHtml += '</tr>';
-        }
-        tableBody.innerHTML = tbodyHtml;
-        status.textContent = `Загружено ${data.length - 1} строк`;
-
-        document.querySelectorAll('#dataTableBody td[contenteditable="true"]').forEach(td => {
-            td.addEventListener('blur', function() {
-                const newValue = this.textContent.trim();
-                const row = parseInt(this.dataset.row);
-                const col = parseInt(this.dataset.col);
-                const sheet = this.dataset.sheet;
-                const oldValue = this.dataset.oldValue;
-                if (newValue !== oldValue) {
-                    updateSheetCell(sheet, row, col, newValue).catch(() => {
-                        this.textContent = oldValue;
-                    });
-                }
-            });
-            td.addEventListener('focus', function() {
-                this.dataset.oldValue = this.textContent.trim();
-            });
-        });
-
+        tableHeaders = data[0];
+        tableData = data.slice(1);
+        populateFilters(tableHeaders, tableData);
+        applyFiltersAndSearch();
+        status.textContent = `Загружено ${tableData.length} строк`;
     } catch (e) {
         console.error('Ошибка загрузки данных:', e);
         status.textContent = 'Ошибка: ' + e.message;
-        tableHead.innerHTML = '';
-        tableBody.innerHTML = '<tr><td class="text-danger">Ошибка загрузки</td></tr>';
+        document.getElementById('dataTableHead').innerHTML = '';
+        document.getElementById('dataTableBody').innerHTML = '<tr><td class="text-danger">Ошибка загрузки</td></tr>';
+        document.getElementById('filterContainer').innerHTML = '';
     }
+    isLoadingTable = false;
+}
+
+function populateFilters(headers, data) {
+    const container = document.getElementById('filterContainer');
+    container.innerHTML = '';
+    headers.forEach((header, idx) => {
+        const colDiv = document.createElement('div');
+        colDiv.className = 'col-auto';
+        const select = document.createElement('select');
+        select.className = 'form-select form-select-sm column-filter';
+        select.dataset.col = idx;
+        select.innerHTML = `<option value="">${header}</option>`;
+        const unique = [...new Set(data.map(row => row[idx]).filter(v => v !== undefined && v !== null && v !== ''))];
+        unique.sort();
+        unique.forEach(val => {
+            const opt = document.createElement('option');
+            opt.value = val;
+            opt.textContent = val;
+            select.appendChild(opt);
+        });
+        select.addEventListener('change', applyFiltersAndSearch);
+        colDiv.appendChild(select);
+        container.appendChild(colDiv);
+    });
+}
+
+function applyFiltersAndSearch() {
+    const searchTerm = document.getElementById('tableSearchInput').value.toLowerCase();
+    const filterValues = {};
+    document.querySelectorAll('.column-filter').forEach(select => {
+        const col = select.dataset.col;
+        const val = select.value;
+        if (val) filterValues[col] = val;
+    });
+
+    tableFilteredData = tableData.filter((row) => {
+        if (searchTerm) {
+            const rowStr = row.join(' ').toLowerCase();
+            if (!rowStr.includes(searchTerm)) return false;
+        }
+        for (let col in filterValues) {
+            const idx = parseInt(col);
+            if (row[idx] !== filterValues[col]) return false;
+        }
+        return true;
+    });
+
+    renderTable(tableFilteredData);
+    document.getElementById('dataStatus').textContent = `Показано ${tableFilteredData.length} из ${tableData.length} строк`;
+}
+
+function renderTable(data) {
+    const tableBody = document.getElementById('dataTableBody');
+    const thead = document.getElementById('dataTableHead');
+    if (tableHeaders.length && !thead.innerHTML) {
+        thead.innerHTML = `<tr><th></th>${tableHeaders.map(h => `<th>${h}</th>`).join('')}</tr>`;
+    }
+    if (!data.length) {
+        tableBody.innerHTML = '<tr><td colspan="100" class="text-muted text-center">Нет данных</td></tr>';
+        return;
+    }
+    let html = '';
+    data.forEach((row, index) => {
+        const sheetRow = index + 2;
+        html += `<tr>
+            <td><input type="checkbox" class="row-selector" data-sheet-row="${sheetRow}" data-filtered-index="${index}"></td>
+            ${row.map(cell => `<td>${cell !== undefined && cell !== null ? cell : ''}</td>`).join('')}
+        </tr>`;
+    });
+    tableBody.innerHTML = html;
+
+    document.querySelectorAll('#dataTableBody td:not(:first-child)').forEach(td => {
+        td.setAttribute('contenteditable', 'true');
+        td.addEventListener('blur', function() {
+            const newValue = this.textContent.trim();
+            const tr = this.parentElement;
+            const colIndex = Array.from(tr.children).indexOf(this) - 1;
+            const sheetRow = parseInt(tr.querySelector('.row-selector').dataset.sheetRow);
+            const sheet = document.getElementById('sheetSelect').value;
+            if (sheetRow && colIndex >= 0) {
+                updateSheetCell(sheet, sheetRow, colIndex, newValue).catch(() => {});
+            }
+        });
+        td.addEventListener('focus', function() {
+            this.dataset.oldValue = this.textContent.trim();
+        });
+    });
 }
 
 // ============================
-// 14. ОФЛАЙН-РЕЖИМ
+// 15. ОФЛАЙН-РЕЖИМ
 // ============================
 function savePendingScan(inventoryNumber, type = 'barcode') {
     let pending = JSON.parse(localStorage.getItem('pendingScans') || '[]');
@@ -1270,7 +1579,7 @@ async function syncPendingData() {
 }
 
 // ============================
-// 15. ЛОГИ
+// 16. ЛОГИ
 // ============================
 function renderLogs() {
     const container = document.getElementById('logsList');
@@ -1343,7 +1652,7 @@ window.createFromLog = function(inventoryNumber) {
 };
 
 // ============================
-// 16. МОДАЛКА СОЗДАНИЯ
+// 17. МОДАЛКА СОЗДАНИЯ
 // ============================
 function showCreateDeviceModal(inventoryNumber) {
     document.getElementById('createInventoryNumber').value = inventoryNumber;
@@ -1368,6 +1677,7 @@ async function confirmCreateDevice() {
     const status = document.getElementById('createStatus').value;
     const responsible = document.getElementById('createResponsible').value.trim();
     const warranty = document.getElementById('createWarranty').value.trim();
+    const cabinet = document.getElementById('createCabinet').value;
 
     if (!inv || !validateInventoryNumber(inv)) {
         showToast('Неверный инвентарный номер (длина 6-20 символов)', 'danger');
@@ -1401,7 +1711,7 @@ async function confirmCreateDevice() {
         const modal = bootstrap.Modal.getInstance(document.getElementById('createDeviceModal'));
         if (modal) modal.hide();
 
-        await addDevice({ inventoryNumber: inv, model, serialNumber: serial, status, responsiblePerson: responsible, warrantyEndDate: warranty });
+        await addDevice({ inventoryNumber: inv, cabinet, model, serialNumber: serial, status, responsiblePerson: responsible, warrantyEndDate: warranty });
 
         let pendingScans = JSON.parse(localStorage.getItem('pendingScans') || '[]');
         pendingScans = pendingScans.filter(item => item.inventoryNumber !== inv);
@@ -1446,16 +1756,17 @@ async function confirmCreateDevice() {
 }
 
 // ============================
-// 17. ОТЧЁТ
+// 18. ОТЧЁТ
 // ============================
 function generateCSV(data) {
     if (!data || !Array.isArray(data) || data.length === 0) return '';
-    const headers = ['Инвентарный номер', 'Серийный номер', 'Модель', 'Статус', 'Ответственное лицо', 'Дата окончания гарантии', 'История перемещений', 'Последнее изменение', 'Инициатор'];
+    const headers = ['Инвентарный номер', 'Аудитория', 'Серийный номер', 'Модель', 'Статус', 'Ответственное лицо', 'Дата окончания гарантии', 'История перемещений', 'Последнее изменение', 'Инициатор'];
     let csv = headers.join(',') + '\n';
     data.forEach(d => {
         if (!d) return;
         const row = [
             d.inventoryNumber || '',
+            d.cabinet || '',
             d.serialNumber || '',
             d.model || '',
             d.status || '',
@@ -1501,7 +1812,7 @@ function printReport() {
         }
     }
     if (filteredData.length === 0) {
-        showToast('Нет данных для выбранного кабинета', 'warning');
+        showToast('Нет данных для выбранной аудитории', 'warning');
         return;
     }
 
@@ -1510,17 +1821,48 @@ function printReport() {
     printDiv.style.display = 'none';
     document.body.appendChild(printDiv);
 
-    let tableHtml = `<table class="table table-bordered table-striped"><thead><tr>
-        <th>Инв. номер</th><th>Серийный</th><th>Модель</th><th>Статус</th>
-        <th>Ответственный</th><th>Гарантия до</th><th>История</th>
-    </tr></thead><tbody>`;
+    const style = document.createElement('style');
+    style.textContent = `
+        @page { size: landscape; margin: 3mm; }
+        #report-print-content table { font-size: 6px !important; table-layout: auto !important; width: 100% !important; border-collapse: collapse !important; }
+        #report-print-content th, #report-print-content td { 
+            padding: 1px 2px !important; 
+            border: 1px solid #000 !important;
+            font-size: 6px !important;
+            white-space: nowrap !important;
+        }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; }
+    `;
+    printDiv.appendChild(style);
+
+    let tableHtml = `<table>
+        <thead><tr>
+            <th>Инв. номер</th>
+            <th>Аудитория</th>
+            <th>Серийный</th>
+            <th>Модель</th>
+            <th>Статус</th>
+            <th>Ответственный</th>
+            <th>Гарантия до</th>
+            <th>История (последнее)</th>
+        </tr></thead><tbody>`;
     filteredData.forEach(d => {
         if (!d) return;
-        tableHtml += `<tr><td>${d.inventoryNumber}</td><td>${d.serialNumber || ''}</td>
-            <td>${d.model || ''}</td><td>${d.status || ''}</td>
+        let lastEvent = '';
+        if (d.history) {
+            const events = d.history.split('; ').filter(s => s.trim());
+            lastEvent = events.length > 0 ? events[events.length - 1] : '';
+        }
+        tableHtml += `<tr>
+            <td>${d.inventoryNumber || ''}</td>
+            <td>${d.cabinet || ''}</td>
+            <td>${d.serialNumber || ''}</td>
+            <td>${d.model || ''}</td>
+            <td>${d.status || ''}</td>
             <td>${d.responsiblePerson || ''}</td>
-            <td>${d.warrantyEndDate || ''}</td>
-            <td>${(d.history || '').replace(/;/g, ', ')}</td></tr>`;
+            <td>${formatDate(d.warrantyEndDate) !== '—' ? formatDate(d.warrantyEndDate) : ''}</td>
+            <td>${lastEvent}</td>
+        </tr>`;
     });
     tableHtml += '</tbody></table>';
     printDiv.innerHTML = tableHtml;
@@ -1532,7 +1874,7 @@ function printReport() {
 }
 
 // ============================
-// 18. НАВИГАЦИЯ
+// 19. НАВИГАЦИЯ
 // ============================
 let navButtons = [];
 let activePill = null;
@@ -1551,7 +1893,7 @@ function updateActivePill(smooth = true) {
 }
 
 // ============================
-// 19. ИНИЦИАЛИЗАЦИЯ
+// 20. ИНИЦИАЛИЗАЦИЯ
 // ============================
 document.addEventListener('DOMContentLoaded', async function() {
     const forceHideLoading = setTimeout(() => {
@@ -1724,6 +2066,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             document.getElementById('editResponsible').value = currentDevice.responsiblePerson || '';
             document.getElementById('editWarranty').value = currentDevice.warrantyEndDate || '';
             document.getElementById('editStatus').value = currentDevice.status || 'В эксплуатации';
+            document.getElementById('editComment').value = '';
             const modal = new bootstrap.Modal(document.getElementById('editModal'));
             modal.show();
         });
@@ -1734,11 +2077,13 @@ document.addEventListener('DOMContentLoaded', async function() {
             const responsible = document.getElementById('editResponsible').value.trim();
             const warranty = document.getElementById('editWarranty').value.trim();
             const status = document.getElementById('editStatus').value;
+            const cabinet = document.getElementById('editCabinet')?.value || '';
+            const comment = document.getElementById('editComment')?.value.trim() || '';
             if (warranty && !/^\d{2}\.\d{2}\.\d{4}$/.test(warranty)) {
                 showToast('Неверный формат даты (ДД.ММ.ГГГГ)', 'danger');
                 return;
             }
-            const updates = { model, serialNumber: serial, responsiblePerson: responsible, warrantyEndDate: warranty, status };
+            const updates = { model, serialNumber: serial, responsiblePerson: responsible, warrantyEndDate: warranty, status, cabinet, comment };
             const modal = bootstrap.Modal.getInstance(document.getElementById('editModal'));
             if (modal) modal.hide();
             await performDeviceAction('edit', updates);
@@ -1806,7 +2151,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             if (cabinet) {
                 renderChecklist(cabinet);
             } else {
-                document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Выберите кабинет</div>';
+                document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Выберите аудиторию</div>';
                 document.getElementById('progressText').textContent = '0 из 0';
                 document.getElementById('progressBar').style.width = '0%';
                 document.getElementById('progressBar').textContent = '0%';
