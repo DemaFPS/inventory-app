@@ -1,7 +1,8 @@
 /**
- * app.js – Полная версия с работающим фонариком и расширенной таблицей
- * (поиск, фильтры, добавление/удаление строк, редактирование ячеек)
- * Основа: версия с подтверждением сканирования и фонариком через MediaStreamTrack.
+ * app.js – Полная версия с работающим фонариком, расширенной таблицей,
+ * добавлением аудитории при создании, отображением аудитории на карточке,
+ * скрытием комментария в истории перемещений (на карточке).
+ * Адаптировано под новую структуру листа Inventory (колонка "Аудитория").
  */
 
 // ============================
@@ -23,7 +24,7 @@ const auth = firebase.auth();
 // ============================
 // 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwtYvVMQMGskQJceyRwO8-UdfRQAo8ptqTO5Z-QPaHvFyQ5LxrKR39PywG9gJRGdJiA/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbzyACDnbqwR-OgpiH4PamMbp7FMdx_kl467drJ3UhHfSKXagthmZoptu6eReX9vg-37/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -249,7 +250,7 @@ async function updateDevice(inventoryNumber, updates) {
 }
 
 async function addDevice(deviceData) {
-    const { inventoryNumber, model, serialNumber, status, responsiblePerson, warrantyEndDate } = deviceData;
+    const { inventoryNumber, cabinet, model, serialNumber, status, responsiblePerson, warrantyEndDate } = deviceData;
     if (!inventoryNumber || !validateInventoryNumber(inventoryNumber)) {
         showToast('Неверный инвентарный номер', 'danger');
         throw new Error('Invalid inventory number');
@@ -279,14 +280,22 @@ async function addDevice(deviceData) {
         }
     }
     try {
+        // Передаём в прокси все поля, включая cabinet
         const result = await callProxy('add', {
-            ...deviceData,
+            inventoryNumber,
+            cabinet: cabinet || '', // может быть пустым
+            model: model || '',
+            serialNumber: serialNumber || '',
+            status: status || 'В эксплуатации',
+            responsiblePerson: responsiblePerson || '',
+            warrantyEndDate: warrantyEndDate || '',
             initiator: getInitiatorName()
         });
         showToast(result.message || 'Устройство создано', 'success');
         const now = new Date().toLocaleString('ru-RU');
         const newDevice = {
             inventoryNumber: inventoryNumber,
+            cabinet: cabinet || '',
             model: model || '',
             serialNumber: serialNumber || '',
             status: status || 'В эксплуатации',
@@ -299,6 +308,25 @@ async function addDevice(deviceData) {
         inventoryData.push(newDevice);
         localStorage.setItem('inventoryCache', JSON.stringify(inventoryData));
         updateDashboardStats();
+
+        // Обновляем аудиторию (добавляем инвентарный номер в список)
+        if (cabinet) {
+            const cab = cabinetsData.find(c => c.cabinet === cabinet);
+            let numbers = cab ? cab.inventoryNumbers : [];
+            if (!numbers.includes(inventoryNumber)) {
+                numbers.push(inventoryNumber);
+                await updateCabinetList(cabinet, numbers);
+                // Обновляем локальные данные
+                const cabIdx = cabinetsData.findIndex(c => c.cabinet === cabinet);
+                if (cabIdx !== -1) {
+                    cabinetsData[cabIdx].inventoryNumbers = numbers;
+                } else {
+                    cabinetsData.push({ cabinet, inventoryNumbers: numbers });
+                }
+                localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
+            }
+        }
+
         return result;
     } catch (error) {
         if (error.message && (error.message.includes('уже существует') || error.message.includes('Duplicate'))) {
@@ -339,10 +367,10 @@ async function updateSheetCell(sheetName, row, col, value) {
 async function updateCabinetList(cabinetName, inventoryNumbers) {
     try {
         const result = await callProxy('updateChecklist', { cabinet: cabinetName, inventoryNumbers });
-        showToast(result.message || 'Кабинет обновлён', 'success');
+        showToast(result.message || 'Аудитория обновлена', 'success');
         return result;
     } catch (error) {
-        console.error('Ошибка обновления кабинета:', error);
+        console.error('Ошибка обновления аудитории:', error);
         showToast('Ошибка обновления: ' + error.message, 'danger');
         throw error;
     }
@@ -641,10 +669,9 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('editChecklistBtn')?.addEventListener('click', function() {
         const cabinet = document.getElementById('cabinetSelect')?.value;
         if (!cabinet) {
-            showToast('Выберите кабинет', 'warning');
+            showToast('Выберите аудиторию', 'warning');
             return;
         }
-        // Включаем режим редактирования
         isChecklistEditMode = true;
         renderChecklist(cabinet);
     });
@@ -652,10 +679,9 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('saveChecklistBtn')?.addEventListener('click', async function() {
         const cabinet = document.getElementById('cabinetSelect')?.value;
         if (!cabinet) {
-            showToast('Кабинет не выбран', 'warning');
+            showToast('Аудитория не выбрана', 'warning');
             return;
         }
-        // Собираем номера из списка
         const items = document.querySelectorAll('#checklistItems .list-group-item');
         const newNumbers = [];
         items.forEach(item => {
@@ -665,7 +691,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (num) newNumbers.push(num);
             }
         });
-        // Добавляем номер из поля ввода, если есть
         const newItemInput = document.getElementById('newChecklistItemInput');
         if (newItemInput && newItemInput.value.trim()) {
             const newNum = newItemInput.value.trim();
@@ -674,7 +699,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             newItemInput.value = '';
         }
-        // Проверяем изменения
         const currentCabinet = cabinetsData.find(c => c.cabinet === cabinet);
         const currentNumbers = currentCabinet ? currentCabinet.inventoryNumbers : [];
         const sortedNew = [...newNumbers].sort();
@@ -692,7 +716,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 cabinetsData[cabIdx].inventoryNumbers = newNumbers;
                 localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
             }
-            showToast('Кабинет обновлён', 'success');
+            showToast('Аудитория обновлена', 'success');
             isChecklistEditMode = false;
             renderChecklist(cabinet);
         } catch (e) {
@@ -798,6 +822,25 @@ document.addEventListener('DOMContentLoaded', function() {
             showToast('Ошибка удаления: ' + e.message, 'danger');
         }
     });
+
+    // Заполняем селект аудиторий в модалке создания при открытии
+    const createModal = document.getElementById('createDeviceModal');
+    if (createModal) {
+        createModal.addEventListener('show.bs.modal', function() {
+            const select = document.getElementById('createCabinet');
+            if (select) {
+                select.innerHTML = '<option value="">— Не выбрана —</option>';
+                cabinetsData.forEach(cab => {
+                    if (cab && cab.cabinet) {
+                        const opt = document.createElement('option');
+                        opt.value = cab.cabinet;
+                        opt.textContent = cab.cabinet;
+                        select.appendChild(opt);
+                    }
+                });
+            }
+        });
+    }
 });
 
 // ============================
@@ -889,6 +932,7 @@ async function renderDeviceCard(device) {
     };
 
     setText('deviceInventory', 'Инв. № ' + (device.inventoryNumber || ''));
+    setText('deviceCabinet', device.cabinet || '—'); // новая строка
     setText('deviceModel', device.model || '—');
     setText('deviceSerial', device.serialNumber || '—');
     setText('deviceStatus', device.status || '—');
@@ -966,7 +1010,7 @@ async function performDeviceAction(action, data = {}) {
             updates.responsiblePerson = data.fio;
             actionDescription = `Передано сотруднику ${data.fio}`;
             comment = data.comment || 'без комментария';
-            newHistoryEntry = `${timestamp} Передано сотруднику ${data.fio} (${comment})`;
+            newHistoryEntry = `${timestamp} Передано сотруднику ${data.fio}`; // без комментария
             break;
         case 'repair':
             updates.status = 'В ремонте';
@@ -994,6 +1038,7 @@ async function performDeviceAction(action, data = {}) {
             if (data.responsiblePerson !== undefined) updates.responsiblePerson = data.responsiblePerson;
             if (data.warrantyEndDate) updates.warrantyEndDate = data.warrantyEndDate;
             if (data.status) updates.status = data.status;
+            if (data.cabinet !== undefined) updates.cabinet = data.cabinet; // добавим возможность редактировать аудиторию
             actionDescription = 'Отредактированы данные';
             comment = data.comment || 'без комментария';
             newHistoryEntry = `${timestamp} Отредактированы данные (${comment})`;
@@ -1052,7 +1097,7 @@ let isChecklistEditMode = false;
 async function loadCabinetSelect() {
     const select = document.getElementById('cabinetSelect');
     if (!select) return;
-    select.innerHTML = '<option value="">— Выберите кабинет —</option>';
+    select.innerHTML = '<option value="">— Выберите аудиторию —</option>';
     if (cabinetsData.length === 0) await loadInventory();
     cabinetsData.forEach(cab => {
         if (!cab || !cab.cabinet) return;
@@ -1063,7 +1108,7 @@ async function loadCabinetSelect() {
     });
     const reportFilter = document.getElementById('reportCabinetFilter');
     if (reportFilter) {
-        reportFilter.innerHTML = '<option value="">Все кабинеты</option>';
+        reportFilter.innerHTML = '<option value="">Все аудитории</option>';
         cabinetsData.forEach(cab => {
             if (!cab || !cab.cabinet) return;
             const opt = document.createElement('option');
@@ -1076,7 +1121,7 @@ async function loadCabinetSelect() {
 
 function renderChecklist(cabinetName) {
     if (!cabinetName) {
-        document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Выберите кабинет</div>';
+        document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Выберите аудиторию</div>';
         document.getElementById('progressText').textContent = '0 из 0';
         document.getElementById('progressBar').style.width = '0%';
         document.getElementById('progressBar').textContent = '0%';
@@ -1088,7 +1133,7 @@ function renderChecklist(cabinetName) {
 
     const cabinet = cabinetsData.find(c => c && c.cabinet === cabinetName);
     if (!cabinet) {
-        document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Кабинет не найден</div>';
+        document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Аудитория не найдена</div>';
         document.getElementById('progressText').textContent = '0 из 0';
         document.getElementById('progressBar').style.width = '0%';
         document.getElementById('progressBar').textContent = '0%';
@@ -1466,6 +1511,7 @@ function showCreateDeviceModal(inventoryNumber) {
     document.getElementById('createStatus').value = 'В эксплуатации';
     document.getElementById('createResponsible').value = '';
     document.getElementById('createWarranty').value = '';
+    // Селект аудитории заполняется при открытии модалки (см. событие show.bs.modal)
     const modal = new bootstrap.Modal(document.getElementById('createDeviceModal'));
     modal.show();
 }
@@ -1482,6 +1528,7 @@ async function confirmCreateDevice() {
     const status = document.getElementById('createStatus').value;
     const responsible = document.getElementById('createResponsible').value.trim();
     const warranty = document.getElementById('createWarranty').value.trim();
+    const cabinet = document.getElementById('createCabinet').value;
 
     if (!inv || !validateInventoryNumber(inv)) {
         showToast('Неверный инвентарный номер (длина 6-20 символов)', 'danger');
@@ -1515,7 +1562,7 @@ async function confirmCreateDevice() {
         const modal = bootstrap.Modal.getInstance(document.getElementById('createDeviceModal'));
         if (modal) modal.hide();
 
-        await addDevice({ inventoryNumber: inv, model, serialNumber: serial, status, responsiblePerson: responsible, warrantyEndDate: warranty });
+        await addDevice({ inventoryNumber: inv, cabinet, model, serialNumber: serial, status, responsiblePerson: responsible, warrantyEndDate: warranty });
 
         let pendingScans = JSON.parse(localStorage.getItem('pendingScans') || '[]');
         pendingScans = pendingScans.filter(item => item.inventoryNumber !== inv);
@@ -1564,12 +1611,13 @@ async function confirmCreateDevice() {
 // ============================
 function generateCSV(data) {
     if (!data || !Array.isArray(data) || data.length === 0) return '';
-    const headers = ['Инвентарный номер', 'Серийный номер', 'Модель', 'Статус', 'Ответственное лицо', 'Дата окончания гарантии', 'История перемещений', 'Последнее изменение', 'Инициатор'];
+    const headers = ['Инвентарный номер', 'Аудитория', 'Серийный номер', 'Модель', 'Статус', 'Ответственное лицо', 'Дата окончания гарантии', 'История перемещений', 'Последнее изменение', 'Инициатор'];
     let csv = headers.join(',') + '\n';
     data.forEach(d => {
         if (!d) return;
         const row = [
             d.inventoryNumber || '',
+            d.cabinet || '',
             d.serialNumber || '',
             d.model || '',
             d.status || '',
@@ -1615,7 +1663,7 @@ function printReport() {
         }
     }
     if (filteredData.length === 0) {
-        showToast('Нет данных для выбранного кабинета', 'warning');
+        showToast('Нет данных для выбранной аудитории', 'warning');
         return;
     }
 
@@ -1625,12 +1673,12 @@ function printReport() {
     document.body.appendChild(printDiv);
 
     let tableHtml = `<table class="table table-bordered table-striped"><thead><tr>
-        <th>Инв. номер</th><th>Серийный</th><th>Модель</th><th>Статус</th>
+        <th>Инв. номер</th><th>Аудитория</th><th>Серийный</th><th>Модель</th><th>Статус</th>
         <th>Ответственный</th><th>Гарантия до</th><th>История</th>
     </tr></thead><tbody>`;
     filteredData.forEach(d => {
         if (!d) return;
-        tableHtml += `<tr><td>${d.inventoryNumber}</td><td>${d.serialNumber || ''}</td>
+        tableHtml += `<tr><td>${d.inventoryNumber}</td><td>${d.cabinet || ''}</td><td>${d.serialNumber || ''}</td>
             <td>${d.model || ''}</td><td>${d.status || ''}</td>
             <td>${d.responsiblePerson || ''}</td>
             <td>${d.warrantyEndDate || ''}</td>
@@ -1838,6 +1886,28 @@ document.addEventListener('DOMContentLoaded', async function() {
             document.getElementById('editResponsible').value = currentDevice.responsiblePerson || '';
             document.getElementById('editWarranty').value = currentDevice.warrantyEndDate || '';
             document.getElementById('editStatus').value = currentDevice.status || 'В эксплуатации';
+            // Добавим поле для аудитории в модалку редактирования
+            let editCabinetSelect = document.getElementById('editCabinet');
+            if (!editCabinetSelect) {
+                // Если поля нет, создадим его
+                const container = document.getElementById('editModal').querySelector('.modal-body');
+                const div = document.createElement('div');
+                div.className = 'mb-2';
+                div.innerHTML = `<label>Аудитория</label><select id="editCabinet" class="form-select"><option value="">— Не выбрана —</option></select>`;
+                container.insertBefore(div, container.querySelector('#editModel').parentElement.nextSibling);
+                editCabinetSelect = document.getElementById('editCabinet');
+            }
+            // Заполняем селект аудиториями
+            editCabinetSelect.innerHTML = '<option value="">— Не выбрана —</option>';
+            cabinetsData.forEach(cab => {
+                if (cab && cab.cabinet) {
+                    const opt = document.createElement('option');
+                    opt.value = cab.cabinet;
+                    opt.textContent = cab.cabinet;
+                    if (cab.cabinet === currentDevice.cabinet) opt.selected = true;
+                    editCabinetSelect.appendChild(opt);
+                }
+            });
             const modal = new bootstrap.Modal(document.getElementById('editModal'));
             modal.show();
         });
@@ -1848,11 +1918,12 @@ document.addEventListener('DOMContentLoaded', async function() {
             const responsible = document.getElementById('editResponsible').value.trim();
             const warranty = document.getElementById('editWarranty').value.trim();
             const status = document.getElementById('editStatus').value;
+            const cabinet = document.getElementById('editCabinet')?.value || '';
             if (warranty && !/^\d{2}\.\d{2}\.\d{4}$/.test(warranty)) {
                 showToast('Неверный формат даты (ДД.ММ.ГГГГ)', 'danger');
                 return;
             }
-            const updates = { model, serialNumber: serial, responsiblePerson: responsible, warrantyEndDate: warranty, status };
+            const updates = { model, serialNumber: serial, responsiblePerson: responsible, warrantyEndDate: warranty, status, cabinet };
             const modal = bootstrap.Modal.getInstance(document.getElementById('editModal'));
             if (modal) modal.hide();
             await performDeviceAction('edit', updates);
@@ -1920,7 +1991,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             if (cabinet) {
                 renderChecklist(cabinet);
             } else {
-                document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Выберите кабинет</div>';
+                document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Выберите аудиторию</div>';
                 document.getElementById('progressText').textContent = '0 из 0';
                 document.getElementById('progressBar').style.width = '0%';
                 document.getElementById('progressBar').textContent = '0%';
