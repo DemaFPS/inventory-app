@@ -3,10 +3,10 @@
  * 
  * Исправления:
  * 1. В renderChecklist убрано условие на статус 'Списан' – теперь любой существующий номер считается найденным.
- * 2. Режим редактирования ведомости теперь сохраняет изменения моментально:
- *    – добавление номера → сразу обновляет список в Google Sheets
- *    – удаление (кнопка × или массовое) → сразу сохраняет
- * 3. Кнопка "Сохранить" скрыта, сохранение происходит автоматически.
+ * 2. Режим редактирования ведомости сохраняет изменения моментально (без кнопки "Сохранить").
+ * 3. При добавлении номера в ведомость, если устройство существует, но имеет статус не "В эксплуатации" или другую аудиторию,
+ *    оно автоматически переводится в "В эксплуатации" и присваивается выбранная аудитория.
+ * 4. В отчёте при печати таблица на всю страницу, сверху по центру – номер аудитории.
  */
 
 // ============================
@@ -597,7 +597,57 @@ async function onScanSuccess(decodedText, decodedResult) {
 function onScanError(err) { /* игнорируем */ }
 
 // ============================
-// 9. ОБРАБОТЧИКИ DOM
+// 9. НОВАЯ ФУНКЦИЯ: ОБЕСПЕЧИТЬ АКТИВНЫЙ СТАТУС И АУДИТОРИЮ
+// ============================
+async function ensureDeviceActiveAndInCabinet(inventoryNumber, cabinet) {
+    const normalized = normalizeInventoryNumber(inventoryNumber);
+    const device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
+    if (!device) {
+        // Устройство не существует – создаём новое
+        await addDevice({
+            inventoryNumber: inventoryNumber,
+            cabinet: cabinet,
+            model: '',
+            serialNumber: '',
+            status: 'В эксплуатации',
+            responsiblePerson: '',
+            warrantyEndDate: ''
+        });
+        return true;
+    } else {
+        // Устройство существует – проверяем статус и аудиторию
+        let updates = {};
+        let needUpdate = false;
+        if (device.status !== 'В эксплуатации') {
+            updates.status = 'В эксплуатации';
+            needUpdate = true;
+        }
+        if (device.cabinet !== cabinet) {
+            updates.cabinet = cabinet;
+            needUpdate = true;
+        }
+        if (needUpdate) {
+            const now = new Date().toLocaleString('ru-RU');
+            const historyEntry = `${now} Добавлен в аудиторию ${cabinet} (статус изменён на "В эксплуатации") (${getInitiatorName()})`;
+            updates.history = (device.history || '') + (device.history ? '; ' : '') + historyEntry;
+            updates.lastModified = now;
+            updates.initiator = getInitiatorName();
+            await updateDevice(inventoryNumber, updates);
+            // Обновляем локальные данные
+            const idx = inventoryData.findIndex(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
+            if (idx !== -1) {
+                inventoryData[idx] = { ...inventoryData[idx], ...updates };
+                localStorage.setItem('inventoryCache', JSON.stringify(inventoryData));
+            }
+            showToast(`Устройство ${inventoryNumber} обновлено (статус → "В эксплуатации", аудитория → ${cabinet})`, 'success');
+            return true;
+        }
+        return false;
+    }
+}
+
+// ============================
+// 10. ОБРАБОТЧИКИ DOM
 // ============================
 document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('confirmScanOkBtn')?.addEventListener('click', function() {
@@ -684,10 +734,7 @@ document.addEventListener('DOMContentLoaded', function() {
         renderChecklist(cabinet);
     });
 
-    // Кнопка сохранения больше не используется – убираем её логику
-    // document.getElementById('saveChecklistBtn') – игнорируем
-
-    // Обработчик добавления номера – теперь сохраняет сразу
+    // Обработчик добавления номера – теперь использует ensureDeviceActiveAndInCabinet
     document.getElementById('addChecklistItemBtn')?.addEventListener('click', async function() {
         const input = document.getElementById('newChecklistItemInput');
         if (!input || !input.value.trim()) {
@@ -717,32 +764,14 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
 
-        // Проверяем, есть ли номер в инвентаризации
-        const exists = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(num));
-        if (!exists) {
-            // Создаём устройство автоматически
-            try {
-                await addDevice({
-                    inventoryNumber: num,
-                    cabinet: cabinet,
-                    model: '',
-                    serialNumber: '',
-                    status: 'В эксплуатации',
-                    responsiblePerson: '',
-                    warrantyEndDate: ''
-                });
-                showToast('Устройство создано и добавлено в аудиторию', 'success');
-            } catch (e) {
-                showToast('Ошибка создания устройства: ' + e.message, 'danger');
-                return;
-            }
-        }
+        // ★★★ НОВАЯ ЛОГИКА: обеспечить активный статус и аудиторию ★★★
+        await ensureDeviceActiveAndInCabinet(num, cabinet);
 
         // Добавляем номер в DOM
         const container = document.getElementById('checklistItems');
         const newItem = document.createElement('div');
         newItem.className = 'list-group-item d-flex justify-content-between align-items-center list-group-item-light';
-        // Проверяем наличие после возможного создания
+        // Проверяем наличие после обновления
         const existsNow = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(num));
         let controls = '';
         if (isChecklistEditMode) {
@@ -766,7 +795,7 @@ document.addEventListener('DOMContentLoaded', function() {
         input.value = '';
         showToast('Номер добавлен в список', 'success');
 
-        // === МГНОВЕННОЕ СОХРАНЕНИЕ ===
+        // Мгновенное сохранение
         await saveChecklistChanges(cabinet);
 
         // Обновляем прогресс
@@ -781,7 +810,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (item) {
                     item.remove();
                     showToast(`Номер ${invNum} удалён из списка`, 'info');
-                    // Мгновенное сохранение после удаления
                     saveChecklistChanges(cabinet);
                     updateChecklistProgress();
                 }
@@ -807,7 +835,6 @@ document.addEventListener('DOMContentLoaded', function() {
             if (item) item.remove();
         });
         showToast(`Удалено ${checked.length} элементов`, 'success');
-        // Мгновенное сохранение
         saveChecklistChanges(cabinet);
         updateChecklistProgress();
     });
@@ -910,7 +937,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // ============================
-// 10. ОБРАБОТКА ШТРИХ-КОДА
+// 11. ОБРАБОТКА ШТРИХ-КОДА
 // ============================
 async function processScannedBarcode(rawText) {
     const normalized = normalizeInventoryNumber(rawText);
@@ -975,7 +1002,7 @@ async function handleManualFind() {
 }
 
 // ============================
-// 11. КАРТОЧКА УСТРОЙСТВА
+// 12. КАРТОЧКА УСТРОЙСТВА
 // ============================
 async function loadDeviceHistory(inventoryNumber) {
     try {
@@ -1029,7 +1056,7 @@ async function renderDeviceCard(device) {
 }
 
 // ============================
-// 12. ДЕЙСТВИЯ С УСТРОЙСТВОМ
+// 13. ДЕЙСТВИЯ С УСТРОЙСТВОМ
 // ============================
 async function performDeviceAction(action, data = {}) {
     if (!currentDevice) {
@@ -1181,7 +1208,7 @@ function removePendingAction(inventoryNumber) {
 }
 
 // ============================
-// 13. ОБОРОТНАЯ ВЕДОМОСТЬ
+// 14. ОБОРОТНАЯ ВЕДОМОСТЬ
 // ============================
 let isChecklistEditMode = false;
 
@@ -1239,7 +1266,7 @@ async function saveChecklistChanges(cabinetName) {
             cabinetsData.push({ cabinet: cabinetName, inventoryNumbers: numbers });
         }
         localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
-        // Перерисовываем ведомость, чтобы обновить статусы (может измениться, если добавили новый номер)
+        // Перерисовываем ведомость, чтобы обновить статусы
         renderChecklist(cabinetName);
     } catch (e) {
         showToast('Ошибка сохранения: ' + e.message, 'danger');
@@ -1318,7 +1345,7 @@ function renderChecklist(cabinetName) {
     if (isChecklistEditMode) {
         document.getElementById('editChecklistBtn').style.display = 'none';
         document.getElementById('checklistEditControls').style.display = 'grid';
-        // Вешаем обработчики для кнопок удаления (уже есть, но добавим на случай перерисовки)
+        // Вешаем обработчики для кнопок удаления
         document.querySelectorAll('.remove-checklist-item').forEach(btn => {
             btn.addEventListener('click', function(e) {
                 e.stopPropagation();
@@ -1328,7 +1355,6 @@ function renderChecklist(cabinetName) {
                 if (item && cabinet) {
                     item.remove();
                     showToast(`Номер ${invNum} удалён из списка`, 'info');
-                    // Мгновенное сохранение
                     saveChecklistChanges(cabinet);
                     updateChecklistProgress();
                 }
@@ -1356,7 +1382,7 @@ function updateChecklistProgress() {
 }
 
 // ============================
-// 14. ТАБЛИЦА (вкладка) с индикатором загрузки
+// 15. ТАБЛИЦА (вкладка) с индикатором загрузки
 // ============================
 async function loadSheetData(sheetName) {
     if (isLoadingTable) return;
@@ -1480,7 +1506,7 @@ function renderTable(data) {
 }
 
 // ============================
-// 15. ОФЛАЙН-РЕЖИМ
+// 16. ОФЛАЙН-РЕЖИМ
 // ============================
 function savePendingScan(inventoryNumber, type = 'barcode') {
     let pending = JSON.parse(localStorage.getItem('pendingScans') || '[]');
@@ -1595,7 +1621,7 @@ async function syncPendingData() {
 }
 
 // ============================
-// 16. ЛОГИ
+// 17. ЛОГИ
 // ============================
 function renderLogs() {
     const container = document.getElementById('logsList');
@@ -1668,7 +1694,7 @@ window.createFromLog = function(inventoryNumber) {
 };
 
 // ============================
-// 17. МОДАЛКА СОЗДАНИЯ
+// 18. МОДАЛКА СОЗДАНИЯ
 // ============================
 function showCreateDeviceModal(inventoryNumber) {
     document.getElementById('createInventoryNumber').value = inventoryNumber;
@@ -1772,7 +1798,7 @@ async function confirmCreateDevice() {
 }
 
 // ============================
-// 18. ОТЧЁТ
+// 19. ОТЧЁТ
 // ============================
 function generateCSV(data) {
     if (!data || !Array.isArray(data) || data.length === 0) return '';
@@ -1820,11 +1846,13 @@ function printReport() {
     }
     const cabinetFilter = document.getElementById('reportCabinetFilter')?.value;
     let filteredData = inventoryData;
+    let cabinetName = '';
     if (cabinetFilter) {
         const cabinet = cabinetsData.find(c => c && c.cabinet === cabinetFilter);
         if (cabinet && Array.isArray(cabinet.inventoryNumbers)) {
             const normList = cabinet.inventoryNumbers.map(n => normalizeInventoryNumber(n));
             filteredData = inventoryData.filter(d => normList.includes(normalizeInventoryNumber(d.inventoryNumber)));
+            cabinetName = cabinetFilter;
         }
     }
     if (filteredData.length === 0) {
@@ -1839,18 +1867,49 @@ function printReport() {
 
     const style = document.createElement('style');
     style.textContent = `
-        @page { size: landscape; margin: 3mm; }
-        #report-print-content table { font-size: 6px !important; table-layout: auto !important; width: 100% !important; border-collapse: collapse !important; }
-        #report-print-content th, #report-print-content td { 
-            padding: 1px 2px !important; 
-            border: 1px solid #000 !important;
-            font-size: 6px !important;
-            white-space: nowrap !important;
+        @page { size: landscape; margin: 5mm; }
+        #report-print-content {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            font-family: Arial, sans-serif;
+        }
+        #report-print-content .report-title {
+            font-size: 18pt;
+            font-weight: bold;
+            text-align: center;
+            margin: 10px 0;
+            width: 100%;
+        }
+        #report-print-content table {
+            font-size: 8pt;
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: auto;
+        }
+        #report-print-content th, #report-print-content td {
+            border: 1px solid #000;
+            padding: 2px 4px;
+            text-align: left;
+            white-space: nowrap;
+        }
+        #report-print-content th {
+            background-color: #f0f0f0;
         }
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; }
     `;
     printDiv.appendChild(style);
 
+    // Заголовок
+    const title = document.createElement('div');
+    title.className = 'report-title';
+    title.textContent = cabinetName ? `Аудитория: ${cabinetName}` : 'Общий отчёт по инвентаризации';
+    printDiv.appendChild(title);
+
+    // Таблица
     let tableHtml = `<table>
         <thead><tr>
             <th>Инв. номер</th>
@@ -1881,7 +1940,9 @@ function printReport() {
         </tr>`;
     });
     tableHtml += '</tbody></table>';
-    printDiv.innerHTML = tableHtml;
+    const tableDiv = document.createElement('div');
+    tableDiv.innerHTML = tableHtml;
+    printDiv.appendChild(tableDiv);
 
     printDiv.style.display = 'block';
     window.print();
@@ -1890,7 +1951,7 @@ function printReport() {
 }
 
 // ============================
-// 19. НАВИГАЦИЯ
+// 20. НАВИГАЦИЯ
 // ============================
 let navButtons = [];
 let activePill = null;
@@ -1909,7 +1970,7 @@ function updateActivePill(smooth = true) {
 }
 
 // ============================
-// 20. ИНИЦИАЛИЗАЦИЯ
+// 21. ИНИЦИАЛИЗАЦИЯ
 // ============================
 document.addEventListener('DOMContentLoaded', async function() {
     const forceHideLoading = setTimeout(() => {
