@@ -28,7 +28,7 @@ const auth = firebase.auth();
 // ============================
 // 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwfiDf4kbT20AL4wh0lEEqyPBjsFrAf9soTRg8_anbNOsWWtS_VEg9vN2z7h06r_vOS/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwRDYe4IOsqjvvrmVwOd4agNYaHn1v2mrygHM36MIrbwVJPl0eLJrtlxONQv_2mYJOU/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
