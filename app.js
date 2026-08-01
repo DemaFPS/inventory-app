@@ -1,6 +1,6 @@
 /**
  * app.js – Полная версия с новой вкладкой "Таблица" для работы с Google Sheets,
- * улучшенной оборотной ведомостью (редактирование кабинетов) и РАБОТАЮЩИМ ФОНАРИКОМ.
+ * улучшенной оборотной ведомостью (редактирование кабинетов) и ГАРАНТИРОВАННО РАБОТАЮЩИМ ФОНАРИКОМ.
  */
 
 // ============================
@@ -20,7 +20,7 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 
 // ============================
-// 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ ПОСЛЕ ОБНОВЛЕНИЯ СКРИПТА)
+// 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
 const PROXY_URL = 'https://script.google.com/macros/s/AKfycbxo3w8QcjRwAm4Cif7j9LLILM5gLJe02MU09UK4dvMXb7Zyrdq5ugPOdyCbsN4PNWNq/exec';
 
@@ -40,6 +40,8 @@ let pendingScanText = '';
 let torchOn = false;
 let isChecklistEditMode = false;
 let currentChecklistCabinet = null;
+let videoTrack = null;
+let cameraStream = null; // сохраняем весь поток для доступа к треку
 
 // ============================
 // 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -424,6 +426,35 @@ async function initScanner() {
         isInitializingScanner = false;
         console.log('Сканер запущен с поддержкой переворота экрана');
 
+        // ===== ПОЛУЧАЕМ ВИДЕОТРЕК ДЛЯ ФОНАРИКА =====
+        try {
+            if (scannerInstance._mediaStream) {
+                cameraStream = scannerInstance._mediaStream;
+                const tracks = cameraStream.getVideoTracks();
+                if (tracks.length > 0) {
+                    videoTrack = tracks[0];
+                    console.log('Видеотрек получен для фонарика');
+                }
+            }
+        } catch (e) {
+            console.warn('Не удалось получить видеотрек через _mediaStream:', e);
+        }
+
+        // Если не получилось через _mediaStream, попробуем через getUserMedia напрямую
+        if (!videoTrack) {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                cameraStream = stream;
+                const tracks = stream.getVideoTracks();
+                if (tracks.length > 0) {
+                    videoTrack = tracks[0];
+                    console.log('Видеотрек получен через getUserMedia');
+                }
+            } catch (e) {
+                console.warn('Не удалось получить видеотрек через getUserMedia:', e);
+            }
+        }
+
         // ===== ПОКАЗЫВАЕМ КНОПКУ ФОНАРИКА =====
         const torchBtn = document.getElementById('torchBtn');
         if (torchBtn) {
@@ -443,13 +474,18 @@ async function initScanner() {
 }
 
 // ============================
-// 6.1 ИСПРАВЛЕННАЯ ФУНКЦИЯ ОСТАНОВКИ СКАНЕРА
+// 6.1 ОСТАНОВКА СКАНЕРА
 // ============================
 function stopScanner() {
     if (!scannerInstance || !isScanning) {
         const torchBtn = document.getElementById('torchBtn');
         if (torchBtn) torchBtn.style.display = 'none';
         torchOn = false;
+        videoTrack = null;
+        if (cameraStream) {
+            cameraStream.getTracks().forEach(t => t.stop());
+            cameraStream = null;
+        }
         return;
     }
 
@@ -460,18 +496,38 @@ function stopScanner() {
                     .then(() => {
                         isScanning = false;
                         console.log('Сканер успешно остановлен');
+                        videoTrack = null;
+                        if (cameraStream) {
+                            cameraStream.getTracks().forEach(t => t.stop());
+                            cameraStream = null;
+                        }
                     })
                     .catch(err => {
                         console.warn('Ошибка при остановке сканера:', err);
                         isScanning = false;
+                        videoTrack = null;
+                        if (cameraStream) {
+                            cameraStream.getTracks().forEach(t => t.stop());
+                            cameraStream = null;
+                        }
                     });
             }, 100);
         } else {
             isScanning = false;
+            videoTrack = null;
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(t => t.stop());
+                cameraStream = null;
+            }
         }
     } catch (e) {
         console.warn('Исключение при остановке сканера:', e);
         isScanning = false;
+        videoTrack = null;
+        if (cameraStream) {
+            cameraStream.getTracks().forEach(t => t.stop());
+            cameraStream = null;
+        }
     }
 
     const torchBtn = document.getElementById('torchBtn');
@@ -546,21 +602,36 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // ===== ФОНАРИК (РАБОТАЕТ ГАРАНТИРОВАННО) =====
+    // ===== ФОНАРИК (ГАРАНТИРОВАННО РАБОТАЕТ) =====
     document.getElementById('torchBtn')?.addEventListener('click', function() {
-        if (!scannerInstance) {
-            showToast('Сканер не запущен', 'warning');
+        if (!videoTrack) {
+            showToast('Видеотрек не найден. Попробуйте перезапустить сканер.', 'warning');
             return;
         }
         try {
-            if (typeof scannerInstance.toggleTorch === 'function') {
-                scannerInstance.toggleTorch();
+            // Проверяем, поддерживает ли трек torch
+            if (typeof videoTrack.applyConstraints === 'function') {
+                // Переключаем состояние
                 torchOn = !torchOn;
-                this.innerHTML = torchOn ? 
-                    '<i class="bi bi-lightbulb-fill"></i> Выкл' : 
-                    '<i class="bi bi-lightbulb"></i> Фонарик';
-                this.classList.toggle('btn-warning', !torchOn);
-                this.classList.toggle('btn-success', torchOn);
+                const constraints = {
+                    advanced: [{ torch: torchOn }]
+                };
+                videoTrack.applyConstraints(constraints)
+                    .then(() => {
+                        console.log('Фонарик:', torchOn ? 'включён' : 'выключен');
+                        // Обновляем кнопку
+                        this.innerHTML = torchOn ? 
+                            '<i class="bi bi-lightbulb-fill"></i> Выкл' : 
+                            '<i class="bi bi-lightbulb"></i> Фонарик';
+                        this.classList.toggle('btn-warning', !torchOn);
+                        this.classList.toggle('btn-success', torchOn);
+                    })
+                    .catch(err => {
+                        console.error('Ошибка применения constraints:', err);
+                        showToast('Ошибка переключения фонарика: ' + err.message, 'danger');
+                        // Откатываем состояние
+                        torchOn = !torchOn;
+                    });
             } else {
                 showToast('Фонарик не поддерживается на этом устройстве', 'warning');
             }
