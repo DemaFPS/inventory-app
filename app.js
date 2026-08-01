@@ -1,6 +1,12 @@
 /**
- * app.js – ФИНАЛЬНАЯ ВЕРСИЯ (исправлена ведомость: при добавлении номера, если его нет в инвентаризации, он автоматически создаётся)
- * Теперь при добавлении номера в ведомость он сразу становится "Найдено".
+ * app.js – ПОЛНАЯ ВЕРСИЯ (исправлена ведомость)
+ * 
+ * Что исправлено:
+ * - При добавлении номера в ведомость, если его нет в инвентаризации,
+ *   устройство создаётся автоматически, и затем данные обновляются с сервера,
+ *   чтобы статус "Найдено" отображался корректно.
+ * - Даты форматируются в ДД.ММ.ГГГГ.
+ * - Все остальные функции (сканер, карточка, таблица, отчёт) работают штатно.
  */
 
 // ============================
@@ -22,7 +28,7 @@ const auth = firebase.auth();
 // ============================
 // 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbx1LvVVinrAjF5cckLGUC-gS6JWwnz7vxMC42FJbl2y6s9_ey8ex6wA1_jB7OmWfr5P/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwnXrkaIPpwvjCk1N8UA4EpNjj-QfZV1eYF5ryXLO4vYF2tmAljuSvDu6fMm3_ark3L/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -668,6 +674,8 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // ===== ОБОРОТНАЯ ВЕДОМОСТЬ =====
+    let isChecklistEditMode = false;
+
     document.getElementById('editChecklistBtn')?.addEventListener('click', function() {
         const cabinet = document.getElementById('cabinetSelect')?.value;
         if (!cabinet) {
@@ -722,7 +730,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // ИСПРАВЛЕННЫЙ ОБРАБОТЧИК addChecklistItemBtn (с автоматическим созданием устройства)
+    // ===== ИСПРАВЛЕННЫЙ ОБРАБОТЧИК addChecklistItemBtn =====
     document.getElementById('addChecklistItemBtn')?.addEventListener('click', async function() {
         const input = document.getElementById('newChecklistItemInput');
         if (!input || !input.value.trim()) {
@@ -741,7 +749,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         // === ЗАГРУЖАЕМ СВЕЖИЕ ДАННЫЕ С СЕРВЕРА ===
-        await loadInventory(); // обновляем inventoryData и cabinetsData
+        await loadInventory();
 
         // Проверяем, есть ли уже такой номер в списке (в DOM)
         const existingItems = document.querySelectorAll('#checklistItems .list-group-item span');
@@ -759,18 +767,15 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 await addDevice({
                     inventoryNumber: num,
-                    cabinet: cabinet, // передаём аудиторию, чтобы добавить в неё
+                    cabinet: cabinet,
                     model: '',
                     serialNumber: '',
                     status: 'В эксплуатации',
                     responsiblePerson: '',
                     warrantyEndDate: ''
                 });
-                // После создания устройство уже добавлено в inventoryData и cabinetsData
-                // Но addDevice также обновил аудиторию, поэтому номер уже есть в списке.
-                // Мы можем пропустить шаг updateCabinetList, так как addDevice уже сделал это.
-                // Однако мы всё равно должны обновить DOM и прогресс.
-                // Поэтому после создания просто обновим отображение.
+                // ПОСЛЕ СОЗДАНИЯ ОБЯЗАТЕЛЬНО ПЕРЕЗАГРУЖАЕМ ДАННЫЕ
+                await loadInventory();
                 showToast('Устройство создано и добавлено в аудиторию', 'success');
             } catch (e) {
                 showToast('Ошибка создания устройства: ' + e.message, 'danger');
@@ -778,13 +783,13 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
 
-        // Получаем текущие номера из DOM (если устройство создано, то номер уже есть в inventoryData, но в DOM его нет)
-        // Поэтому мы должны добавить номер в DOM в любом случае.
+        // Теперь проверяем наличие номера в актуальных данных
+        const existsNow = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(num));
+
+        // Добавляем элемент в DOM
         const container = document.getElementById('checklistItems');
         const newItem = document.createElement('div');
         newItem.className = 'list-group-item d-flex justify-content-between align-items-center list-group-item-light';
-        // После создания или проверки статус будет "Найдено", так как номер теперь точно есть в inventoryData
-        const existsNow = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(num));
         let controls = '';
         if (isChecklistEditMode) {
             controls = `
@@ -807,7 +812,8 @@ document.addEventListener('DOMContentLoaded', function() {
         input.value = '';
         showToast('Номер добавлен в список', 'success');
         updateChecklistProgress();
-        // Вешаем обработчик на кнопку удаления
+
+        // Обработчик удаления
         const removeBtn = newItem.querySelector('.remove-checklist-item');
         if (removeBtn) {
             removeBtn.addEventListener('click', function(e) {
