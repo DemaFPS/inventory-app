@@ -63,6 +63,15 @@
             border: 1px solid var(--divider);
             color: var(--color-text);
         }
+        .table-controls .form-control::placeholder {
+            color: #6c757d;
+        }
+        .table-controls .form-control:focus {
+            border-color: var(--color-primary);
+            box-shadow: 0 0 0 0.2rem rgba(74,144,226,0.25);
+            background: var(--color-card-bg);
+            color: var(--color-text);
+        }
         .table-controls .btn {
             font-size: 0.85rem;
             padding: 0.2rem 0.8rem;
@@ -76,31 +85,51 @@
             padding: 0.2rem 0.3rem;
             font-size: 0.8rem;
             border-bottom: 1px solid rgba(0,0,0,0.05);
+            vertical-align: middle;
+            color: var(--color-text);
         }
         #dataTable td:focus {
             outline: 2px solid var(--color-primary);
-            background: #fff;
+            background: var(--color-card-bg);
+            border-radius: 2px;
+            color: var(--color-text);
         }
         [data-theme="dark"] #dataTable td:focus {
             background: #2d2d3f;
-            color: #fff;
+            color: #ffffff;
         }
         [data-theme="dark"] #dataTable th {
             background: #1e1e1e;
             border-bottom-color: rgba(255,255,255,0.1);
+            color: #ffffff;
+        }
+        [data-theme="dark"] #dataTable td {
+            color: #e0e0e0;
         }
         [data-theme="dark"] #dataTableContainer {
             border-color: rgba(255,255,255,0.1);
         }
         [data-theme="dark"] .table-controls .form-control {
             background: #2d2d3f;
-            color: #e0e0e0;
+            color: #ffffff;
             border-color: rgba(255,255,255,0.1);
+        }
+        [data-theme="dark"] .table-controls .form-control::placeholder {
+            color: #adb5bd;
+        }
+        [data-theme="dark"] .table-controls .form-control:focus {
+            background: #2d2d3f;
+            color: #ffffff;
+            border-color: var(--color-primary);
         }
         [data-theme="dark"] .column-filter {
             background: #2d2d3f;
             color: #e0e0e0;
             border-color: rgba(255,255,255,0.1);
+        }
+        [data-theme="dark"] .column-filter option {
+            background: #2d2d3f;
+            color: #e0e0e0;
         }
         @media (max-width: 576px) {
             .column-filter {
