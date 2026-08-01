@@ -1,13 +1,13 @@
 /**
- * app.js – ПОЛНАЯ ВЕРСИЯ
+ * app.js – ПОЛНАЯ ВЕРСИЯ (финальная)
  * 
- * Включает:
- * - Инвентаризация (сканирование, карточка, действия)
- * - Оборотная ведомость (аудитории)
- * - Таблица с редактированием (только последняя запись истории, даты форматируются)
- * - Отчёт (печать PDF, выгрузка CSV)
- * - Офлайн-режим (локальное сохранение, синхронизация)
- * - Роли пользователей (user / admin), панель администратора
+ * Исправления:
+ * - URL прокси заканчивается на /exec (без лишних букв)
+ * - В fetch добавлен mode: 'cors'
+ * - Дата окончания гарантии отображается в формате ДД.ММ.ГГГГ
+ * - В таблице колонка «История перемещений» показывает только последнее событие
+ * - Печать отчёта адаптивна, таблица на всю страницу
+ * - Роли пользователей: user / admin, панель администратора
  */
 
 // ============================
@@ -27,9 +27,9 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 
 // ============================
-// 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
+// 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ / ОБЯЗАТЕЛЬНО /exec)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbzMZinV-5D3bJONsiNTdyPBqVc8DFGaAle-S-4KaWj1BgsZsnmmx5QBspp-55OP_aY_/exe';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwm4YKCOm-lxHiQkBVlD2QDo6dKfFr5fj6QBeajFikW4eZCXviguIBJWLQ-YBDs6r1L/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -203,6 +203,7 @@ async function callProxy(action, payload = {}) {
     try {
         const response = await fetch(PROXY_URL, {
             method: 'POST',
+            mode: 'cors',
             headers: { 'Content-Type': 'text/plain' },
             body: JSON.stringify({ action, payload })
         });
@@ -1515,9 +1516,6 @@ function applyFiltersAndSearch() {
     document.getElementById('dataStatus').textContent = `Показано ${tableFilteredData.length} из ${tableData.length} строк`;
 }
 
-// ============================================================
-// ИСПРАВЛЕННАЯ ФУНКЦИЯ renderTable – форматирование дат и только последняя история
-// ============================================================
 function renderTable(data) {
     const tableBody = document.getElementById('dataTableBody');
     const thead = document.getElementById('dataTableHead');
@@ -1529,12 +1527,10 @@ function renderTable(data) {
         return;
     }
 
-    // Индекс колонки "История перемещений"
     const historyIndex = tableHeaders.findIndex(h =>
         h.trim().toLowerCase() === 'история перемещений' ||
         h.trim().toLowerCase() === 'history'
     );
-    // Индексы колонок с датами
     const dateColumns = [];
     tableHeaders.forEach((h, idx) => {
         const lower = h.trim().toLowerCase();
@@ -1547,7 +1543,6 @@ function renderTable(data) {
     data.forEach((row, index) => {
         const sheetRow = index + 2;
         const rowCopy = row.slice();
-        // Форматируем даты
         dateColumns.forEach(colIdx => {
             if (rowCopy[colIdx]) {
                 const formatted = formatDate(rowCopy[colIdx]);
@@ -1556,7 +1551,6 @@ function renderTable(data) {
                 }
             }
         });
-        // Заменяем историю на последнее событие
         if (historyIndex !== -1 && rowCopy[historyIndex]) {
             const historyStr = rowCopy[historyIndex];
             const events = historyStr.split('; ').filter(s => s.trim());
@@ -1569,7 +1563,6 @@ function renderTable(data) {
     });
     tableBody.innerHTML = html;
 
-    // Назначаем редактирование (кроме колонки истории)
     document.querySelectorAll('#dataTableBody td:not(:first-child)').forEach(td => {
         const tr = td.parentElement;
         const colIndex = Array.from(tr.children).indexOf(td) - 1;
@@ -1887,7 +1880,7 @@ async function confirmCreateDevice() {
 }
 
 // ============================
-// 20. ОТЧЁТ (CSV + улучшенная печать)
+// 20. ОТЧЁТ (CSV + печать)
 // ============================
 function generateCSV(data) {
     if (!data || !Array.isArray(data) || data.length === 0) return '';
@@ -1928,9 +1921,6 @@ function downloadCSV(csv) {
     URL.revokeObjectURL(url);
 }
 
-// ============================================================
-// ИСПРАВЛЕННАЯ ФУНКЦИЯ printReport – адаптивная печать
-// ============================================================
 function printReport() {
     if (!inventoryData || inventoryData.length === 0) {
         showToast('Нет данных для печати', 'warning');
@@ -1955,17 +1945,8 @@ function printReport() {
     const style = document.createElement('style');
     style.id = 'print-report-style';
     style.textContent = `
-        @page { 
-            size: landscape; 
-            margin: 5mm; 
-        }
-        body, html { 
-            margin: 0; 
-            padding: 0; 
-            width: 100%; 
-            height: 100%; 
-            background: white;
-        }
+        @page { size: landscape; margin: 5mm; }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: white; }
         #report-print-content {
             width: 100% !important;
             height: 100% !important;
@@ -2004,27 +1985,13 @@ function printReport() {
             font-weight: bold;
         }
         @media (max-width: 600px) {
-            #report-print-content table {
-                font-size: 7pt;
-            }
-            #report-print-content th, #report-print-content td {
-                padding: 2px 3px !important;
-                font-size: 7pt;
-            }
-            #report-print-content .report-title {
-                font-size: 16pt;
-            }
+            #report-print-content table { font-size: 7pt; }
+            #report-print-content th, #report-print-content td { padding: 2px 3px !important; font-size: 7pt; }
+            #report-print-content .report-title { font-size: 16pt; }
         }
         @media print {
-            body, html {
-                margin: 0;
-                padding: 0;
-                width: 100%;
-                height: 100%;
-            }
-            #report-print-content {
-                padding: 5px;
-            }
+            body, html { margin: 0; padding: 0; width: 100%; height: 100%; }
+            #report-print-content { padding: 5px; }
             .no-print { display: none; }
         }
     `;
@@ -2042,14 +2009,8 @@ function printReport() {
 
     let tableHtml = `<table>
         <thead><tr>
-            <th>Инв. номер</th>
-            <th>Аудитория</th>
-            <th>Серийный</th>
-            <th>Модель</th>
-            <th>Статус</th>
-            <th>Ответственный</th>
-            <th>Гарантия до</th>
-            <th>История (последнее)</th>
+            <th>Инв. номер</th><th>Аудитория</th><th>Серийный</th><th>Модель</th><th>Статус</th>
+            <th>Ответственный</th><th>Гарантия до</th><th>История (последнее)</th>
         </tr></thead><tbody>`;
     filteredData.forEach(d => {
         if (!d) return;
@@ -2164,7 +2125,6 @@ document.addEventListener('DOMContentLoaded', async function() {
             });
         });
 
-        // Загружаем роль пользователя
         if (currentUser) {
             currentUserRole = await loadUserRole(currentUser.uid);
             updateNavForRole();
@@ -2269,7 +2229,6 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         });
 
-        // Карточка
         document.getElementById('editBtn')?.addEventListener('click', function() {
             if (!currentDevice) {
                 showToast('Устройство не выбрано', 'warning');
