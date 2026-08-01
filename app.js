@@ -1,12 +1,9 @@
 /**
- * app.js – Полная версия с работающим фонариком, расширенной таблицей,
- * добавлением аудитории при создании, отображением аудитории на карточке,
- * скрытием комментария в истории перемещений (на карточке),
- * возможностью добавить комментарий при редактировании,
- * корректным обновлением аудитории (с синхронизацией Checklists),
- * исправленной оборотной ведомостью с добавлением/удалением номеров,
- * форматированием дат в ДД.ММ.ГГГГ,
- * с поддержкой getSheetData на сервере.
+ * app.js – ФИНАЛЬНАЯ ВЕРСИЯ (исправлена)
+ * - Даты корректно форматируются из ISO в ДД.ММ.ГГГГ.
+ * - В ведомости статус "Найдено" определяется только по реальным данным из inventoryData.
+ * - Убрана фиктивная запись при добавлении номера в ведомость.
+ * - Исправлена нормализация номеров.
  */
 
 // ============================
@@ -28,7 +25,7 @@ const auth = firebase.auth();
 // ============================
 // 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwRDYe4IOsqjvvrmVwOd4agNYaHn1v2mrygHM36MIrbwVJPl0eLJrtlxONQv_2mYJOU/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbx51jZksED1g2d6X7Ey1PvNk9oDH272Ydi84vdRo6dF2CH7MYyfufKBwJuURaxWRwRO/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -44,13 +41,14 @@ let localUserName = localStorage.getItem('localUserName') || 'Аноним';
 let isCreating = false;
 let pendingScanText = '';
 let torchOn = false;
-let torchTrack = null; // для управления фонариком
+let torchTrack = null;
 
 // ===== ПЕРЕМЕННЫЕ ДЛЯ ТАБЛИЦЫ =====
 let tableData = [];
 let tableHeaders = [];
 let tableFilteredData = [];
 let currentSheet = 'Inventory';
+let isLoadingTable = false;
 
 // ============================
 // 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -130,12 +128,22 @@ function showScreen(screenId) {
 
 function formatDate(dateStr) {
     if (!dateStr) return '—';
+    // Если уже в формате ДД.ММ.ГГГГ
     if (/^\d{2}\.\d{2}\.\d{4}$/.test(dateStr)) return dateStr;
-    const date = parseDateFromString(dateStr);
-    if (date) {
+    // Попробуем распарсить как ISO или другую строку
+    const date = new Date(dateStr);
+    if (!isNaN(date.getTime())) {
         const day = String(date.getDate()).padStart(2, '0');
         const month = String(date.getMonth() + 1).padStart(2, '0');
         const year = date.getFullYear();
+        return `${day}.${month}.${year}`;
+    }
+    // Попробуем через parseDateFromString (для формата ДД.ММ.ГГГГ)
+    const parsed = parseDateFromString(dateStr);
+    if (parsed) {
+        const day = String(parsed.getDate()).padStart(2, '0');
+        const month = String(parsed.getMonth() + 1).padStart(2, '0');
+        const year = parsed.getFullYear();
         return `${day}.${month}.${year}`;
     }
     return String(dateStr);
@@ -711,7 +719,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         try {
             await updateCabinetList(cabinet, newNumbers);
-            // Обновляем локальные данные из сервера, чтобы гарантировать синхронизацию
+            // Обновляем локальные данные из сервера
             await loadInventory();
             showToast('Аудитория обновлена', 'success');
             isChecklistEditMode = false;
@@ -765,10 +773,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 cabinetsData[cabIdx].inventoryNumbers = currentNumbers;
                 localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
             }
+            // НЕ добавляем фиктивную запись в inventoryData!
+            // Статус "Найдено" будет определяться по реальным данным
             // Добавляем элемент в DOM
             const container = document.getElementById('checklistItems');
             const newItem = document.createElement('div');
             newItem.className = 'list-group-item d-flex justify-content-between align-items-center list-group-item-light';
+            // Проверяем наличие в реальных данных инвентаризации
             const exists = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(num));
             let controls = '';
             if (isChecklistEditMode) {
@@ -1328,9 +1339,11 @@ function updateChecklistProgress() {
 }
 
 // ============================
-// 14. ТАБЛИЦА (вкладка)
+// 14. ТАБЛИЦА (вкладка) с индикатором загрузки
 // ============================
 async function loadSheetData(sheetName) {
+    if (isLoadingTable) return;
+    isLoadingTable = true;
     currentSheet = sheetName;
     const status = document.getElementById('dataStatus');
     status.textContent = 'Загрузка...';
@@ -1344,6 +1357,7 @@ async function loadSheetData(sheetName) {
             document.getElementById('dataTableBody').innerHTML = '<tr><td class="text-muted">Нет данных</td></tr>';
             status.textContent = 'Нет данных';
             document.getElementById('filterContainer').innerHTML = '';
+            isLoadingTable = false;
             return;
         }
         tableHeaders = data[0];
@@ -1358,6 +1372,7 @@ async function loadSheetData(sheetName) {
         document.getElementById('dataTableBody').innerHTML = '<tr><td class="text-danger">Ошибка загрузки</td></tr>';
         document.getElementById('filterContainer').innerHTML = '';
     }
+    isLoadingTable = false;
 }
 
 function populateFilters(headers, data) {
@@ -1808,27 +1823,28 @@ function printReport() {
     // Добавляем стиль для печати
     const style = document.createElement('style');
     style.textContent = `
-        @page { size: landscape; margin: 5mm; }
-        #report-print-content table { font-size: 7px !important; table-layout: auto !important; width: 100% !important; border-collapse: collapse !important; }
+        @page { size: landscape; margin: 3mm; }
+        #report-print-content table { font-size: 6px !important; table-layout: auto !important; width: 100% !important; border-collapse: collapse !important; }
         #report-print-content th, #report-print-content td { 
             padding: 1px 2px !important; 
             border: 1px solid #000 !important;
-            font-size: 7px !important;
+            font-size: 6px !important;
             white-space: nowrap !important;
         }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; }
     `;
     printDiv.appendChild(style);
 
-    let tableHtml = `<table class="table table-bordered table-striped" style="font-size:7px; table-layout:auto; width:100%; border-collapse:collapse;">
+    let tableHtml = `<table>
         <thead><tr>
-            <th style="padding:2px 3px; border:1px solid #000; white-space:nowrap;">Инв. номер</th>
-            <th style="padding:2px 3px; border:1px solid #000; white-space:nowrap;">Аудитория</th>
-            <th style="padding:2px 3px; border:1px solid #000; white-space:nowrap;">Серийный</th>
-            <th style="padding:2px 3px; border:1px solid #000; white-space:nowrap;">Модель</th>
-            <th style="padding:2px 3px; border:1px solid #000; white-space:nowrap;">Статус</th>
-            <th style="padding:2px 3px; border:1px solid #000; white-space:nowrap;">Ответственный</th>
-            <th style="padding:2px 3px; border:1px solid #000; white-space:nowrap;">Гарантия до</th>
-            <th style="padding:2px 3px; border:1px solid #000; white-space:nowrap;">История (последнее)</th>
+            <th>Инв. номер</th>
+            <th>Аудитория</th>
+            <th>Серийный</th>
+            <th>Модель</th>
+            <th>Статус</th>
+            <th>Ответственный</th>
+            <th>Гарантия до</th>
+            <th>История (последнее)</th>
         </tr></thead><tbody>`;
     filteredData.forEach(d => {
         if (!d) return;
@@ -1838,14 +1854,14 @@ function printReport() {
             lastEvent = events.length > 0 ? events[events.length - 1] : '';
         }
         tableHtml += `<tr>
-            <td style="padding:2px 3px; border:1px solid #000; font-size:7px;">${d.inventoryNumber || ''}</td>
-            <td style="padding:2px 3px; border:1px solid #000; font-size:7px;">${d.cabinet || ''}</td>
-            <td style="padding:2px 3px; border:1px solid #000; font-size:7px;">${d.serialNumber || ''}</td>
-            <td style="padding:2px 3px; border:1px solid #000; font-size:7px;">${d.model || ''}</td>
-            <td style="padding:2px 3px; border:1px solid #000; font-size:7px;">${d.status || ''}</td>
-            <td style="padding:2px 3px; border:1px solid #000; font-size:7px;">${d.responsiblePerson || ''}</td>
-            <td style="padding:2px 3px; border:1px solid #000; font-size:7px;">${d.warrantyEndDate || ''}</td>
-            <td style="padding:2px 3px; border:1px solid #000; font-size:7px;">${lastEvent}</td>
+            <td>${d.inventoryNumber || ''}</td>
+            <td>${d.cabinet || ''}</td>
+            <td>${d.serialNumber || ''}</td>
+            <td>${d.model || ''}</td>
+            <td>${d.status || ''}</td>
+            <td>${d.responsiblePerson || ''}</td>
+            <td>${formatDate(d.warrantyEndDate) !== '—' ? formatDate(d.warrantyEndDate) : ''}</td>
+            <td>${lastEvent}</td>
         </tr>`;
     });
     tableHtml += '</tbody></table>';
