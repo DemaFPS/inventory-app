@@ -1,12 +1,12 @@
 /**
- * app.js – Полная версия
- * - Работающий фонарик
- * - Расширенная таблица (поиск, фильтры, редактирование ячеек, добавление/удаление строк)
- * - Оборотная ведомость с редактированием и кнопкой «Редактировать»
- * - Автосохранение при добавлении номера в ведомость
- * - В карточке устройства – только последнее событие истории
- * - Форматирование дат в ДД.ММ.ГГГГ
- * - Отчёт с компактной печатью
+ * app.js – Полная версия с работающим фонариком, расширенной таблицей,
+ * добавлением аудитории при создании, отображением аудитории на карточке,
+ * скрытием комментария в истории перемещений (на карточке),
+ * возможностью добавить комментарий при редактировании,
+ * корректным обновлением аудитории (с синхронизацией Checklists),
+ * исправленной оборотной ведомостью с добавлением/удалением номеров,
+ * форматированием дат в ДД.ММ.ГГГГ,
+ * с поддержкой getSheetData на сервере.
  */
 
 // ============================
@@ -349,7 +349,9 @@ async function addDevice(deviceData) {
     }
 }
 
-// ===== ФУНКЦИИ ДЛЯ ТАБЛИЦЫ =====
+// ============================
+// 5. ФУНКЦИИ ДЛЯ ТАБЛИЦЫ
+// ============================
 async function getSheetData(sheetName) {
     try {
         const result = await callProxy('getSheetData', { sheetName });
@@ -386,7 +388,7 @@ async function updateCabinetList(cabinetName, inventoryNumbers) {
 }
 
 // ============================
-// 5. ДАШБОРД
+// 6. ДАШБОРД
 // ============================
 function updateDashboardStats() {
     const total = inventoryData.length;
@@ -418,7 +420,7 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 6. СКАНЕР (С ПОДДЕРЖКОЙ ПЕРЕВОРОТА ЭКРАНА И ФОНАРИКА)
+// 7. СКАНЕР
 // ============================
 async function initScanner() {
     if (isInitializingScanner) return;
@@ -552,7 +554,7 @@ function stopScanner() {
 }
 
 // ============================
-// 7. ОБРАБОТКА РЕЗУЛЬТАТА СКАНИРОВАНИЯ
+// 8. ОБРАБОТКА СКАНИРОВАНИЯ
 // ============================
 async function onScanSuccess(decodedText, decodedResult) {
     if (!decodedText) return;
@@ -587,7 +589,7 @@ async function onScanSuccess(decodedText, decodedResult) {
 function onScanError(err) { /* игнорируем */ }
 
 // ============================
-// 8. ОБРАБОТЧИКИ DOM
+// 9. ОБРАБОТЧИКИ DOM
 // ============================
 document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('confirmScanOkBtn')?.addEventListener('click', function() {
@@ -922,7 +924,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // ============================
-// 9. ОБРАБОТКА ПОДТВЕРЖДЁННОГО ШТРИХ-КОДА
+// 10. ОБРАБОТКА ШТРИХ-КОДА
 // ============================
 async function processScannedBarcode(rawText) {
     const normalized = normalizeInventoryNumber(rawText);
@@ -987,7 +989,7 @@ async function handleManualFind() {
 }
 
 // ============================
-// 10. КАРТОЧКА УСТРОЙСТВА
+// 11. КАРТОЧКА УСТРОЙСТВА
 // ============================
 async function loadDeviceHistory(inventoryNumber) {
     try {
@@ -1021,7 +1023,6 @@ async function renderDeviceCard(device) {
 
     const historyContainer = document.getElementById('deviceHistory');
     if (historyContainer) {
-        // Показываем только последнее событие
         if (device.history) {
             const events = device.history.split('; ').filter(s => s.trim());
             const lastEvent = events.length > 0 ? events[events.length - 1] : '';
@@ -1042,7 +1043,7 @@ async function renderDeviceCard(device) {
 }
 
 // ============================
-// 11. ДЕЙСТВИЯ С УСТРОЙСТВОМ
+// 12. ДЕЙСТВИЯ С УСТРОЙСТВОМ
 // ============================
 async function performDeviceAction(action, data = {}) {
     if (!currentDevice) {
@@ -1194,7 +1195,7 @@ function removePendingAction(inventoryNumber) {
 }
 
 // ============================
-// 12. ОБОРОТНАЯ ВЕДОМОСТЬ
+// 13. ОБОРОТНАЯ ВЕДОМОСТЬ
 // ============================
 let isChecklistEditMode = false;
 
@@ -1287,7 +1288,6 @@ function renderChecklist(cabinetName) {
     document.getElementById('progressBar').textContent = percent + '%';
     document.getElementById('progressBar').setAttribute('aria-valuenow', percent);
 
-    // Показываем кнопку "Редактировать", если режим редактирования выключен
     document.getElementById('editChecklistBtn').style.display = 'inline-block';
     document.getElementById('saveChecklistBtn').style.display = 'none';
     document.getElementById('checklistEditControls').style.display = 'none';
@@ -1296,7 +1296,6 @@ function renderChecklist(cabinetName) {
         document.getElementById('editChecklistBtn').style.display = 'none';
         document.getElementById('saveChecklistBtn').style.display = 'inline-block';
         document.getElementById('checklistEditControls').style.display = 'grid';
-        // Вешаем обработчики на кнопки удаления
         document.querySelectorAll('.remove-checklist-item').forEach(btn => {
             btn.addEventListener('click', function(e) {
                 e.stopPropagation();
@@ -1329,7 +1328,7 @@ function updateChecklistProgress() {
 }
 
 // ============================
-// 13. ТАБЛИЦА (вкладка)
+// 14. ТАБЛИЦА (вкладка)
 // ============================
 async function loadSheetData(sheetName) {
     currentSheet = sheetName;
@@ -1449,7 +1448,7 @@ function renderTable(data) {
 }
 
 // ============================
-// 14. ОФЛАЙН-РЕЖИМ
+// 15. ОФЛАЙН-РЕЖИМ
 // ============================
 function savePendingScan(inventoryNumber, type = 'barcode') {
     let pending = JSON.parse(localStorage.getItem('pendingScans') || '[]');
@@ -1564,7 +1563,7 @@ async function syncPendingData() {
 }
 
 // ============================
-// 15. ЛОГИ
+// 16. ЛОГИ
 // ============================
 function renderLogs() {
     const container = document.getElementById('logsList');
@@ -1637,7 +1636,7 @@ window.createFromLog = function(inventoryNumber) {
 };
 
 // ============================
-// 16. МОДАЛКА СОЗДАНИЯ
+// 17. МОДАЛКА СОЗДАНИЯ
 // ============================
 function showCreateDeviceModal(inventoryNumber) {
     document.getElementById('createInventoryNumber').value = inventoryNumber;
@@ -1741,7 +1740,7 @@ async function confirmCreateDevice() {
 }
 
 // ============================
-// 17. ОТЧЁТ
+// 18. ОТЧЁТ
 // ============================
 function generateCSV(data) {
     if (!data || !Array.isArray(data) || data.length === 0) return '';
@@ -1806,7 +1805,21 @@ function printReport() {
     printDiv.style.display = 'none';
     document.body.appendChild(printDiv);
 
-    let tableHtml = `<table class="table table-bordered table-striped" style="font-size:8px; table-layout:auto; width:100%; word-wrap:break-word; border-collapse:collapse;">
+    // Добавляем стиль для печати
+    const style = document.createElement('style');
+    style.textContent = `
+        @page { size: landscape; margin: 5mm; }
+        #report-print-content table { font-size: 7px !important; table-layout: auto !important; width: 100% !important; border-collapse: collapse !important; }
+        #report-print-content th, #report-print-content td { 
+            padding: 1px 2px !important; 
+            border: 1px solid #000 !important;
+            font-size: 7px !important;
+            white-space: nowrap !important;
+        }
+    `;
+    printDiv.appendChild(style);
+
+    let tableHtml = `<table class="table table-bordered table-striped" style="font-size:7px; table-layout:auto; width:100%; border-collapse:collapse;">
         <thead><tr>
             <th style="padding:2px 3px; border:1px solid #000; white-space:nowrap;">Инв. номер</th>
             <th style="padding:2px 3px; border:1px solid #000; white-space:nowrap;">Аудитория</th>
@@ -1825,14 +1838,14 @@ function printReport() {
             lastEvent = events.length > 0 ? events[events.length - 1] : '';
         }
         tableHtml += `<tr>
-            <td style="padding:2px 3px; border:1px solid #000; font-size:8px;">${d.inventoryNumber || ''}</td>
-            <td style="padding:2px 3px; border:1px solid #000; font-size:8px;">${d.cabinet || ''}</td>
-            <td style="padding:2px 3px; border:1px solid #000; font-size:8px;">${d.serialNumber || ''}</td>
-            <td style="padding:2px 3px; border:1px solid #000; font-size:8px;">${d.model || ''}</td>
-            <td style="padding:2px 3px; border:1px solid #000; font-size:8px;">${d.status || ''}</td>
-            <td style="padding:2px 3px; border:1px solid #000; font-size:8px;">${d.responsiblePerson || ''}</td>
-            <td style="padding:2px 3px; border:1px solid #000; font-size:8px;">${d.warrantyEndDate || ''}</td>
-            <td style="padding:2px 3px; border:1px solid #000; font-size:8px;">${lastEvent}</td>
+            <td style="padding:2px 3px; border:1px solid #000; font-size:7px;">${d.inventoryNumber || ''}</td>
+            <td style="padding:2px 3px; border:1px solid #000; font-size:7px;">${d.cabinet || ''}</td>
+            <td style="padding:2px 3px; border:1px solid #000; font-size:7px;">${d.serialNumber || ''}</td>
+            <td style="padding:2px 3px; border:1px solid #000; font-size:7px;">${d.model || ''}</td>
+            <td style="padding:2px 3px; border:1px solid #000; font-size:7px;">${d.status || ''}</td>
+            <td style="padding:2px 3px; border:1px solid #000; font-size:7px;">${d.responsiblePerson || ''}</td>
+            <td style="padding:2px 3px; border:1px solid #000; font-size:7px;">${d.warrantyEndDate || ''}</td>
+            <td style="padding:2px 3px; border:1px solid #000; font-size:7px;">${lastEvent}</td>
         </tr>`;
     });
     tableHtml += '</tbody></table>';
@@ -1845,7 +1858,7 @@ function printReport() {
 }
 
 // ============================
-// 18. НАВИГАЦИЯ
+// 19. НАВИГАЦИЯ
 // ============================
 let navButtons = [];
 let activePill = null;
@@ -1864,7 +1877,7 @@ function updateActivePill(smooth = true) {
 }
 
 // ============================
-// 19. ИНИЦИАЛИЗАЦИЯ
+// 20. ИНИЦИАЛИЗАЦИЯ
 // ============================
 document.addEventListener('DOMContentLoaded', async function() {
     const forceHideLoading = setTimeout(() => {
