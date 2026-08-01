@@ -1,12 +1,12 @@
 /**
- * app.js – ИТОГОВАЯ ВЕРСИЯ
+ * app.js – ИТОГОВАЯ ВЕРСИЯ (без дублирования)
  * 
- * Включает:
- * 1. Мгновенное сохранение изменений в оборотной ведомости (без кнопки "Сохранить").
- * 2. Автоматическое создание устройства, если его нет, или перевод в "В эксплуатации" с назначением аудитории.
- * 3. Устранение дублирования номеров в списке аудитории.
- * 4. Исправленное отображение статуса "Найдено" (без учёта статуса устройства).
- * 5. Печать отчёта с таблицей на всю страницу и крупным центрированным заголовком.
+ * Исправления:
+ * - При добавлении номера в ведомость сначала проверяется его наличие в актуальном списке аудитории.
+ * - После вызова ensureDeviceActiveAndInCabinet (которая может добавить номер) повторно проверяется наличие.
+ * - Все массивы номеров уникализируются перед сохранением.
+ * - Печать отчёта – таблица на всю страницу, центрированный заголовок.
+ * - Мгновенное сохранение, автоматическое обновление статуса.
  */
 
 // ============================
@@ -28,7 +28,7 @@ const auth = firebase.auth();
 // ============================
 // 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbxftg5c-Tz6liYEQsnERtBPXA6kFaKnfX8lWikmiIftXfDNDe0Tsske9Gr4GoWiJtwB/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbykVTVIOuPDUCM3L7DmFuKB1OHBsM04iZOUfKnfjr8RlLkHqEne1Dct0EKVJK9fhTVA/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -188,6 +188,11 @@ function getInitiatorName() {
     return localUserName || 'Аноним';
 }
 
+// ===== Вспомогательная функция для уникализации массива =====
+function uniqueArray(arr) {
+    return arr.filter((v, i, a) => a.indexOf(v) === i);
+}
+
 // ============================
 // 4. РАБОТА С ПРОКСИ
 // ============================
@@ -224,6 +229,10 @@ async function loadInventory() {
             if (c && c.inventoryNumbers && typeof c.inventoryNumbers === 'string') {
                 c.inventoryNumbers = c.inventoryNumbers.split(',').map(s => s.trim());
             }
+            // Уникализируем номера в каждой аудитории
+            if (c && c.inventoryNumbers) {
+                c.inventoryNumbers = uniqueArray(c.inventoryNumbers);
+            }
             return c;
         }) : [];
         localStorage.setItem('inventoryCache', JSON.stringify(inventoryData));
@@ -238,6 +247,8 @@ async function loadInventory() {
             try {
                 inventoryData = JSON.parse(cachedInv) || [];
                 cabinetsData = JSON.parse(cachedCab) || [];
+                // Уникализируем
+                cabinetsData.forEach(c => { if (c.inventoryNumbers) c.inventoryNumbers = uniqueArray(c.inventoryNumbers); });
                 showToast('Загружены данные из кэша (офлайн-режим)', 'warning');
                 return { inventory: inventoryData, cabinets: cabinetsData };
             } catch (e) {
@@ -333,6 +344,7 @@ async function addDevice(deviceData) {
             let numbers = cab ? cab.inventoryNumbers : [];
             if (!numbers.includes(inventoryNumber)) {
                 numbers.push(inventoryNumber);
+                numbers = uniqueArray(numbers); // уникализируем
                 await updateCabinetList(cabinet, numbers);
                 const cabIdx = cabinetsData.findIndex(c => c.cabinet === cabinet);
                 if (cabIdx !== -1) {
@@ -384,8 +396,10 @@ async function updateSheetCell(sheetName, row, col, value) {
 }
 
 async function updateCabinetList(cabinetName, inventoryNumbers) {
+    // Уникализируем перед отправкой
+    const unique = uniqueArray(inventoryNumbers);
     try {
-        const result = await callProxy('updateChecklist', { cabinet: cabinetName, inventoryNumbers });
+        const result = await callProxy('updateChecklist', { cabinet: cabinetName, inventoryNumbers: unique });
         showToast(result.message || 'Аудитория обновлена', 'success');
         return result;
     } catch (error) {
@@ -731,7 +745,7 @@ document.addEventListener('DOMContentLoaded', function() {
         renderChecklist(cabinet);
     });
 
-    // Добавление номера (без дублирования)
+    // ИСПРАВЛЕННЫЙ ОБРАБОТЧИК ДОБАВЛЕНИЯ (без дублирования)
     document.getElementById('addChecklistItemBtn')?.addEventListener('click', async function() {
         const input = document.getElementById('newChecklistItemInput');
         if (!input || !input.value.trim()) {
@@ -749,9 +763,10 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
+        // 1. Загружаем свежие данные
         await loadInventory();
 
-        // Проверка на дубликат в актуальном списке аудитории
+        // 2. Проверяем, есть ли номер в текущем списке аудитории
         const currentCabinet = cabinetsData.find(c => c.cabinet === cabinet);
         const currentNumbers = currentCabinet ? currentCabinet.inventoryNumbers : [];
         if (currentNumbers.some(n => normalizeInventoryNumber(n) === normalizeInventoryNumber(num))) {
@@ -759,17 +774,32 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        // Обеспечиваем активный статус и аудиторию
+        // 3. Обеспечиваем активный статус и аудиторию (может добавить номер)
         await ensureDeviceActiveAndInCabinet(num, cabinet);
 
-        // Добавляем в список и сохраняем
-        const updatedNumbers = [...currentNumbers, num];
-        await updateCabinetList(cabinet, updatedNumbers);
+        // 4. После ensureDeviceActiveAndInCabinet – перезагружаем данные, чтобы получить актуальный список
+        await loadInventory();
+
+        // 5. Снова проверяем наличие номера в списке аудитории (возможно, он уже был добавлен)
+        const updatedCabinet = cabinetsData.find(c => c.cabinet === cabinet);
+        const updatedNumbers = updatedCabinet ? updatedCabinet.inventoryNumbers : [];
+        if (updatedNumbers.some(n => normalizeInventoryNumber(n) === normalizeInventoryNumber(num))) {
+            // Номер уже есть – просто перерисовываем и выходим
+            renderChecklist(cabinet);
+            input.value = '';
+            showToast('Номер уже присутствует в списке', 'info');
+            return;
+        }
+
+        // 6. Если номера всё ещё нет – добавляем его
+        const newNumbers = uniqueArray([...updatedNumbers, num]);
+        await updateCabinetList(cabinet, newNumbers);
+        // Обновляем локальные данные
         const cabIdx = cabinetsData.findIndex(c => c.cabinet === cabinet);
         if (cabIdx !== -1) {
-            cabinetsData[cabIdx].inventoryNumbers = updatedNumbers;
+            cabinetsData[cabIdx].inventoryNumbers = newNumbers;
         } else {
-            cabinetsData.push({ cabinet, inventoryNumbers: updatedNumbers });
+            cabinetsData.push({ cabinet, inventoryNumbers: newNumbers });
         }
         localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
 
@@ -778,7 +808,7 @@ document.addEventListener('DOMContentLoaded', function() {
         showToast('Номер добавлен в список', 'success');
     });
 
-    // Удаление выбранных
+    // Обработчик удаления выбранных (с уникализацией)
     document.getElementById('removeSelectedChecklistBtn')?.addEventListener('click', function() {
         const checked = document.querySelectorAll('.checklist-item-checkbox:checked');
         if (checked.length === 0) {
@@ -791,10 +821,12 @@ document.addEventListener('DOMContentLoaded', function() {
             showToast('Аудитория не выбрана', 'warning');
             return;
         }
-        const newNumbers = [];
-        document.querySelectorAll('#checklistItems .list-group-item span').forEach(span => {
+        // Собираем оставшиеся номера из DOM
+        const items = document.querySelectorAll('#checklistItems .list-group-item span');
+        const numbers = [];
+        items.forEach(span => {
             const num = span.textContent.trim();
-            if (num) newNumbers.push(num);
+            if (num) numbers.push(num);
         });
         // Удаляем выбранные
         checked.forEach(cb => {
@@ -807,10 +839,11 @@ document.addEventListener('DOMContentLoaded', function() {
             const num = span.textContent.trim();
             if (num) finalNumbers.push(num);
         });
-        updateCabinetList(cabinet, finalNumbers).then(() => {
+        const uniqueFinal = uniqueArray(finalNumbers);
+        updateCabinetList(cabinet, uniqueFinal).then(() => {
             const cabIdx = cabinetsData.findIndex(c => c.cabinet === cabinet);
             if (cabIdx !== -1) {
-                cabinetsData[cabIdx].inventoryNumbers = finalNumbers;
+                cabinetsData[cabIdx].inventoryNumbers = uniqueFinal;
             }
             localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
             renderChecklist(cabinet);
@@ -1114,6 +1147,7 @@ async function performDeviceAction(action, data = {}) {
                         const oldCab = cabinetsData.find(c => c.cabinet === oldCabinet);
                         if (oldCab) {
                             let numbers = oldCab.inventoryNumbers.filter(n => n !== inv);
+                            numbers = uniqueArray(numbers);
                             await updateCabinetList(oldCabinet, numbers);
                             const idx = cabinetsData.findIndex(c => c.cabinet === oldCabinet);
                             if (idx !== -1) cabinetsData[idx].inventoryNumbers = numbers;
@@ -1124,6 +1158,7 @@ async function performDeviceAction(action, data = {}) {
                         let numbers = newCab ? newCab.inventoryNumbers : [];
                         if (!numbers.includes(inv)) {
                             numbers.push(inv);
+                            numbers = uniqueArray(numbers);
                             await updateCabinetList(newCabinet, numbers);
                             const idx = cabinetsData.findIndex(c => c.cabinet === newCabinet);
                             if (idx !== -1) cabinetsData[idx].inventoryNumbers = numbers;
@@ -1237,7 +1272,8 @@ function renderChecklist(cabinetName) {
         return;
     }
 
-    const invNumbers = Array.isArray(cabinet.inventoryNumbers) ? cabinet.inventoryNumbers : [];
+    // Убедимся, что номера уникальны
+    const invNumbers = uniqueArray(cabinet.inventoryNumbers || []);
     let found = 0;
     let itemsHtml = '';
 
@@ -1291,15 +1327,17 @@ function renderChecklist(cabinetName) {
                 const cabinet = document.getElementById('cabinetSelect')?.value;
                 if (item && cabinet) {
                     item.remove();
+                    // Собираем новый список
                     const newNumbers = [];
                     document.querySelectorAll('#checklistItems .list-group-item span').forEach(span => {
                         const num = span.textContent.trim();
                         if (num) newNumbers.push(num);
                     });
-                    updateCabinetList(cabinet, newNumbers).then(() => {
+                    const uniqueNew = uniqueArray(newNumbers);
+                    updateCabinetList(cabinet, uniqueNew).then(() => {
                         const cabIdx = cabinetsData.findIndex(c => c.cabinet === cabinet);
                         if (cabIdx !== -1) {
-                            cabinetsData[cabIdx].inventoryNumbers = newNumbers;
+                            cabinetsData[cabIdx].inventoryNumbers = uniqueNew;
                         }
                         localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
                         renderChecklist(cabinet);
@@ -1317,7 +1355,7 @@ function renderChecklist(cabinetName) {
 }
 
 function updateChecklistProgress() {
-    // Оставлена для совместимости, но фактически прогресс обновляется в renderChecklist
+    // Оставлена для совместимости
 }
 
 // ============================
