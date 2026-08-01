@@ -1,11 +1,13 @@
 /**
- * app.js – ИТОГОВАЯ ВЕРСИЯ (с исправлениями дат и печати)
+ * app.js – ПОЛНАЯ ВЕРСИЯ
  * 
- * Исправления:
- * - В таблице (вкладка «Таблица») колонки с датами автоматически форматируются в ДД.ММ.ГГГГ.
- * - Колонка «История перемещений» показывает только последнее событие и не редактируется.
- * - Печать отчёта адаптирована под мобильные устройства, таблица занимает всю ширину страницы.
- * - Остальные исправления: уникализация номеров, проверка дубликатов, офлайн-режим и т.д.
+ * Включает:
+ * - Инвентаризация (сканирование, карточка, действия)
+ * - Оборотная ведомость (аудитории)
+ * - Таблица с редактированием (только последняя запись истории, даты форматируются)
+ * - Отчёт (печать PDF, выгрузка CSV)
+ * - Офлайн-режим (локальное сохранение, синхронизация)
+ * - Роли пользователей (user / admin), панель администратора
  */
 
 // ============================
@@ -27,7 +29,7 @@ const auth = firebase.auth();
 // ============================
 // 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwpSOa_xO74GmNpeOBZsteTm4niWRpwXVgJY07kC2vZy1zX-ZWp0ZQMVSwVAxqWAMs/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbxhCF5wAJZdb2pe_R93i_Sb-ArsydpN_4AxgPBue3Rb_qHuR8F0oVEN6_iUuHZlk_r7/execc';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -45,12 +47,14 @@ let pendingScanText = '';
 let torchOn = false;
 let torchTrack = null;
 
-// ===== ПЕРЕМЕННЫЕ ДЛЯ ТАБЛИЦЫ =====
 let tableData = [];
 let tableHeaders = [];
 let tableFilteredData = [];
 let currentSheet = 'Inventory';
 let isLoadingTable = false;
+
+let currentUserRole = 'user';
+let usersList = [];
 
 // ============================
 // 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -125,6 +129,7 @@ function showScreen(screenId) {
     if (screenId === 'logs') renderLogs();
     if (screenId === 'checklist') renderChecklist(document.getElementById('cabinetSelect')?.value);
     if (screenId === 'data') loadSheetData(document.getElementById('sheetSelect')?.value || 'Inventory');
+    if (screenId === 'adminPanel') loadUsers();
     setTimeout(updateActivePill, 50);
 }
 
@@ -191,21 +196,21 @@ function uniqueArray(arr) {
     return arr.filter((v, i, a) => a.indexOf(v) === i);
 }
 
-// ============================
-// 4. РАБОТА С ПРОКСИ
-// ============================
 async function callProxy(action, payload = {}) {
+    if (currentUser) {
+        payload._uid = currentUser.uid;
+    }
     try {
         const response = await fetch(PROXY_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'text/plain' },
             body: JSON.stringify({ action, payload })
         });
-        if (!response.ok) throw new Error(`Ошибка HTTP: ${response.status}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const text = await response.text();
         let data;
-        try { data = JSON.parse(text); } catch (e) { throw new Error(`Сервер вернул невалидный JSON: ${text.substring(0, 50)}`); }
-        if (!data || typeof data !== 'object') throw new Error('Пустой или невалидный ответ от сервера');
+        try { data = JSON.parse(text); } catch (e) { throw new Error('Невалидный JSON'); }
+        if (!data || typeof data !== 'object') throw new Error('Пустой ответ');
         if (!data.success) throw new Error(data.error || data.message || 'Неизвестная ошибка');
         return data;
     } catch (error) {
@@ -214,6 +219,93 @@ async function callProxy(action, payload = {}) {
     }
 }
 
+// ============================
+// 4. РАБОТА С ПОЛЬЗОВАТЕЛЯМИ И РОЛЯМИ
+// ============================
+async function loadUserRole(uid) {
+    try {
+        const result = await callProxy('getUserRole', { uid });
+        return result.role || 'user';
+    } catch (e) {
+        console.warn('Не удалось загрузить роль, по умолчанию user:', e);
+        return 'user';
+    }
+}
+
+async function loadUsers() {
+    if (currentUserRole !== 'admin') {
+        showToast('Доступ запрещён', 'danger');
+        return;
+    }
+    try {
+        const result = await callProxy('getUsers');
+        usersList = result.users || [];
+        renderUsersTable();
+    } catch (e) {
+        showToast('Ошибка загрузки пользователей: ' + e.message, 'danger');
+    }
+}
+
+async function updateUserRole(uid, newRole) {
+    if (currentUserRole !== 'admin') {
+        showToast('Доступ запрещён', 'danger');
+        return;
+    }
+    try {
+        await callProxy('updateUserRole', { uid, role: newRole });
+        showToast(`Роль изменена на "${newRole}"`, 'success');
+        loadUsers();
+    } catch (e) {
+        showToast('Ошибка обновления роли: ' + e.message, 'danger');
+    }
+}
+
+function renderUsersTable() {
+    const container = document.getElementById('usersList');
+    if (!container) return;
+    if (!usersList.length) {
+        container.innerHTML = '<div class="text-muted">Нет пользователей</div>';
+        return;
+    }
+    let html = `<div class="list-group">`;
+    usersList.forEach(u => {
+        const isAdmin = u.role === 'admin';
+        const isCurrent = u.uid === currentUser?.uid;
+        html += `
+            <div class="list-group-item d-flex justify-content-between align-items-center">
+                <div>
+                    <strong>${u.displayName || u.uid.substring(0,8)}</strong>
+                    <span class="badge ${isAdmin ? 'bg-danger' : 'bg-secondary'} ms-2">${u.role}</span>
+                    ${isCurrent ? '<span class="badge bg-primary ms-2">Вы</span>' : ''}
+                </div>
+                <div>
+                    ${!isCurrent ? `
+                        <button class="btn btn-sm ${isAdmin ? 'btn-warning' : 'btn-success'}" 
+                                onclick="updateUserRole('${u.uid}', '${isAdmin ? 'user' : 'admin'}')">
+                            ${isAdmin ? 'Сделать пользователем' : 'Сделать админом'}
+                        </button>
+                    ` : '<span class="text-muted">—</span>'}
+                </div>
+            </div>
+        `;
+    });
+    html += `</div>`;
+    container.innerHTML = html;
+}
+
+function updateNavForRole() {
+    const adminBtn = document.getElementById('adminBtn');
+    if (!adminBtn) return;
+    if (currentUserRole === 'admin') {
+        adminBtn.style.display = 'flex';
+    } else {
+        adminBtn.style.display = 'none';
+    }
+}
+
+// ============================
+// 5. ОСНОВНЫЕ ДЕЙСТВИЯ (загрузка, обновление, добавление)
+// ============================
 async function loadInventory() {
     try {
         const result = await callProxy('read');
@@ -366,7 +458,7 @@ async function addDevice(deviceData) {
 }
 
 // ============================
-// 5. ФУНКЦИИ ДЛЯ ТАБЛИЦЫ
+// 6. ФУНКЦИИ ДЛЯ ТАБЛИЦЫ
 // ============================
 async function getSheetData(sheetName) {
     try {
@@ -405,7 +497,7 @@ async function updateCabinetList(cabinetName, inventoryNumbers) {
 }
 
 // ============================
-// 6. ДАШБОРД
+// 7. ДАШБОРД
 // ============================
 function updateDashboardStats() {
     const total = inventoryData.length;
@@ -437,7 +529,7 @@ function updateDashboardStats() {
 }
 
 // ============================
-// 7. СКАНЕР
+// 8. СКАНЕР
 // ============================
 async function initScanner() {
     if (isInitializingScanner) return;
@@ -571,7 +663,7 @@ function stopScanner() {
 }
 
 // ============================
-// 8. ОБРАБОТКА СКАНИРОВАНИЯ
+// 9. ОБРАБОТКА СКАНИРОВАНИЯ
 // ============================
 async function onScanSuccess(decodedText, decodedResult) {
     if (!decodedText) return;
@@ -606,7 +698,7 @@ async function onScanSuccess(decodedText, decodedResult) {
 function onScanError(err) { /* игнорируем */ }
 
 // ============================
-// 9. ФУНКЦИЯ: ОБЕСПЕЧИТЬ АКТИВНЫЙ СТАТУС И АУДИТОРИЮ
+// 10. ФУНКЦИЯ: ОБЕСПЕЧИТЬ АКТИВНЫЙ СТАТУС И АУДИТОРИЮ
 // ============================
 async function ensureDeviceActiveAndInCabinet(inventoryNumber, cabinet) {
     const normalized = normalizeInventoryNumber(inventoryNumber);
@@ -653,7 +745,7 @@ async function ensureDeviceActiveAndInCabinet(inventoryNumber, cabinet) {
 }
 
 // ============================
-// 10. ОБРАБОТЧИКИ DOM
+// 11. ОБРАБОТЧИКИ DOM
 // ============================
 document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('confirmScanOkBtn')?.addEventListener('click', function() {
@@ -766,7 +858,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         await ensureDeviceActiveAndInCabinet(num, cabinet);
-
         await loadInventory();
 
         const updatedCabinet = cabinetsData.find(c => c.cabinet === cabinet);
@@ -929,10 +1020,25 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+
+    // ===== ПАНЕЛЬ АДМИНИСТРАТОРА =====
+    document.getElementById('adminBtn')?.addEventListener('click', function() {
+        if (currentUserRole === 'admin') {
+            showScreen('adminPanel');
+        } else {
+            showToast('Доступ запрещён', 'danger');
+        }
+    });
+    document.getElementById('backFromAdmin')?.addEventListener('click', function() {
+        showScreen('dashboard');
+    });
+    document.getElementById('refreshUsersBtn')?.addEventListener('click', function() {
+        if (currentUserRole === 'admin') loadUsers();
+    });
 });
 
 // ============================
-// 11. ОБРАБОТКА ШТРИХ-КОДА
+// 12. ОБРАБОТКА ШТРИХ-КОДА
 // ============================
 async function processScannedBarcode(rawText) {
     const normalized = normalizeInventoryNumber(rawText);
@@ -992,18 +1098,8 @@ async function handleManualFind() {
 }
 
 // ============================
-// 12. КАРТОЧКА УСТРОЙСТВА
+// 13. КАРТОЧКА УСТРОЙСТВА
 // ============================
-async function loadDeviceHistory(inventoryNumber) {
-    try {
-        const result = await callProxy('getHistory', { inventoryNumber });
-        return result.history || [];
-    } catch (error) {
-        console.error('Ошибка загрузки истории:', error);
-        return [];
-    }
-}
-
 async function renderDeviceCard(device) {
     if (!device) {
         showToast('Ошибка: устройство не найдено', 'danger');
@@ -1046,7 +1142,7 @@ async function renderDeviceCard(device) {
 }
 
 // ============================
-// 13. ДЕЙСТВИЯ С УСТРОЙСТВОМ
+// 14. ДЕЙСТВИЯ С УСТРОЙСТВОМ
 // ============================
 async function performDeviceAction(action, data = {}) {
     if (!currentDevice) {
@@ -1200,7 +1296,7 @@ function removePendingAction(inventoryNumber) {
 }
 
 // ============================
-// 14. ОБОРОТНАЯ ВЕДОМОСТЬ
+// 15. ОБОРОТНАЯ ВЕДОМОСТЬ
 // ============================
 let isChecklistEditMode = false;
 
@@ -1333,12 +1429,8 @@ function renderChecklist(cabinetName) {
     }
 }
 
-function updateChecklistProgress() {
-    // Оставлена для совместимости
-}
-
 // ============================
-// 15. ТАБЛИЦА (вкладка)
+// 16. ТАБЛИЦА (вкладка)
 // ============================
 async function loadSheetData(sheetName) {
     if (isLoadingTable) return;
@@ -1424,7 +1516,7 @@ function applyFiltersAndSearch() {
 }
 
 // ============================================================
-// ИСПРАВЛЕННАЯ ФУНКЦИЯ renderTable – форматирование дат, последняя запись истории, запрет редактирования истории
+// ИСПРАВЛЕННАЯ ФУНКЦИЯ renderTable – форматирование дат и только последняя история
 // ============================================================
 function renderTable(data) {
     const tableBody = document.getElementById('dataTableBody');
@@ -1442,7 +1534,7 @@ function renderTable(data) {
         h.trim().toLowerCase() === 'история перемещений' ||
         h.trim().toLowerCase() === 'history'
     );
-    // Индексы колонок с датами (по ключевым словам)
+    // Индексы колонок с датами
     const dateColumns = [];
     tableHeaders.forEach((h, idx) => {
         const lower = h.trim().toLowerCase();
@@ -1482,7 +1574,7 @@ function renderTable(data) {
         const tr = td.parentElement;
         const colIndex = Array.from(tr.children).indexOf(td) - 1;
         if (colIndex === historyIndex) {
-            td.style.backgroundColor = '#f8f9fa'; // лёгкий фон, чтобы было видно, что не редактируется
+            td.style.backgroundColor = '#f8f9fa';
             return;
         }
         td.setAttribute('contenteditable', 'true');
@@ -1503,7 +1595,7 @@ function renderTable(data) {
 }
 
 // ============================
-// 16. ОФЛАЙН-РЕЖИМ
+// 17. ОФЛАЙН-РЕЖИМ
 // ============================
 function savePendingScan(inventoryNumber, type = 'barcode') {
     let pending = JSON.parse(localStorage.getItem('pendingScans') || '[]');
@@ -1618,7 +1710,7 @@ async function syncPendingData() {
 }
 
 // ============================
-// 17. ЛОГИ
+// 18. ЛОГИ
 // ============================
 function renderLogs() {
     const container = document.getElementById('logsList');
@@ -1691,7 +1783,7 @@ window.createFromLog = function(inventoryNumber) {
 };
 
 // ============================
-// 18. МОДАЛКА СОЗДАНИЯ
+// 19. МОДАЛКА СОЗДАНИЯ
 // ============================
 function showCreateDeviceModal(inventoryNumber) {
     document.getElementById('createInventoryNumber').value = inventoryNumber;
@@ -1795,7 +1887,7 @@ async function confirmCreateDevice() {
 }
 
 // ============================
-// 19. ОТЧЁТ
+// 20. ОТЧЁТ (CSV + улучшенная печать)
 // ============================
 function generateCSV(data) {
     if (!data || !Array.isArray(data) || data.length === 0) return '';
@@ -1837,7 +1929,7 @@ function downloadCSV(csv) {
 }
 
 // ============================================================
-// ИСПРАВЛЕННАЯ ФУНКЦИЯ printReport – адаптивная печать на всю страницу
+// ИСПРАВЛЕННАЯ ФУНКЦИЯ printReport – адаптивная печать
 // ============================================================
 function printReport() {
     if (!inventoryData || inventoryData.length === 0) {
@@ -1860,7 +1952,6 @@ function printReport() {
         return;
     }
 
-    // Стили для печати – адаптивные, таблица на всю ширину
     const style = document.createElement('style');
     style.id = 'print-report-style';
     style.textContent = `
@@ -1912,7 +2003,6 @@ function printReport() {
             background-color: #f0f0f0 !important;
             font-weight: bold;
         }
-        /* Адаптация для мобильных устройств */
         @media (max-width: 600px) {
             #report-print-content table {
                 font-size: 7pt;
@@ -1986,14 +2076,13 @@ function printReport() {
 
     window.print();
 
-    // Очистка
     document.body.removeChild(printDiv);
     const styleToRemove = document.getElementById('print-report-style');
     if (styleToRemove) styleToRemove.remove();
 }
 
 // ============================
-// 20. НАВИГАЦИЯ
+// 21. НАВИГАЦИЯ
 // ============================
 let navButtons = [];
 let activePill = null;
@@ -2012,7 +2101,7 @@ function updateActivePill(smooth = true) {
 }
 
 // ============================
-// 21. ИНИЦИАЛИЗАЦИЯ
+// 22. ИНИЦИАЛИЗАЦИЯ
 // ============================
 document.addEventListener('DOMContentLoaded', async function() {
     const forceHideLoading = setTimeout(() => {
@@ -2074,6 +2163,12 @@ document.addEventListener('DOMContentLoaded', async function() {
                 }
             });
         });
+
+        // Загружаем роль пользователя
+        if (currentUser) {
+            currentUserRole = await loadUserRole(currentUser.uid);
+            updateNavForRole();
+        }
 
         await loadInventory();
         updateDashboardStats();
