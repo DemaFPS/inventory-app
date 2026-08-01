@@ -20,9 +20,9 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 
 // ============================
-// 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
+// 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ ПОСЛЕ ОБНОВЛЕНИЯ СКРИПТА)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbzvquzMRqLtXSp8S7YkW_NZoQRnKQmzwDDO1ngU-hEgcdv-ZATPbekw-YzfKkV89sPR/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbxo3w8QcjRwAm4Cif7j9LLILM5gLJe02MU09UK4dvMXb7Zyrdq5ugPOdyCbsN4PNWNq/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -219,6 +219,89 @@ async function loadInventory() {
             }
         }
         showToast('Ошибка загрузки данных: ' + error.message, 'danger');
+        throw error;
+    }
+}
+
+async function updateDevice(inventoryNumber, updates) {
+    if (!validateInventoryNumber(inventoryNumber)) {
+        showToast('Неверный формат инвентарного номера', 'danger');
+        throw new Error('Invalid inventory number');
+    }
+    try {
+        const result = await callProxy('update', { inventoryNumber, updates });
+        showToast(result.message || 'Устройство обновлено', 'success');
+        const idx = inventoryData.findIndex(d => d && d.inventoryNumber === inventoryNumber);
+        if (idx !== -1) {
+            inventoryData[idx] = { ...inventoryData[idx], ...updates };
+            localStorage.setItem('inventoryCache', JSON.stringify(inventoryData));
+        }
+        return result;
+    } catch (error) {
+        throw error;
+    }
+}
+
+async function addDevice(deviceData) {
+    const { inventoryNumber, model, serialNumber, status, responsiblePerson, warrantyEndDate } = deviceData;
+    if (!inventoryNumber || !validateInventoryNumber(inventoryNumber)) {
+        showToast('Неверный инвентарный номер', 'danger');
+        throw new Error('Invalid inventory number');
+    }
+    const normalized = normalizeInventoryNumber(inventoryNumber);
+    const localExists = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
+    if (localExists) {
+        showToast('Устройство с таким номером уже существует (локально)', 'warning');
+        throw new Error('Duplicate local');
+    }
+    if (navigator.onLine) {
+        try {
+            const result = await callProxy('read');
+            const serverExists = result.inventory.some(d => {
+                const num = d && d.inventoryNumber ? String(d.inventoryNumber).trim() : '';
+                return normalizeInventoryNumber(num) === normalized;
+            });
+            if (serverExists) {
+                showToast('Устройство с таким номером уже существует в базе', 'warning');
+                await loadInventory();
+                updateDashboardStats();
+                throw new Error('Duplicate server');
+            }
+        } catch (e) {
+            if (e.message && (e.message.includes('уже существует') || e.message.includes('Duplicate'))) throw e;
+            console.warn('Ошибка проверки на сервере, продолжаем создание:', e);
+        }
+    }
+    try {
+        const result = await callProxy('add', {
+            ...deviceData,
+            initiator: getInitiatorName()
+        });
+        showToast(result.message || 'Устройство создано', 'success');
+        const now = new Date().toLocaleString('ru-RU');
+        const newDevice = {
+            inventoryNumber: inventoryNumber,
+            model: model || '',
+            serialNumber: serialNumber || '',
+            status: status || 'В эксплуатации',
+            responsiblePerson: responsiblePerson || '',
+            warrantyEndDate: warrantyEndDate || '',
+            history: `${now} Создано (${getInitiatorName()})`,
+            lastModified: now,
+            initiator: getInitiatorName()
+        };
+        inventoryData.push(newDevice);
+        localStorage.setItem('inventoryCache', JSON.stringify(inventoryData));
+        updateDashboardStats();
+        return result;
+    } catch (error) {
+        if (error.message && (error.message.includes('уже существует') || error.message.includes('Duplicate'))) {
+            showToast('Устройство с таким номером уже существует в базе', 'warning');
+            await loadInventory();
+            updateDashboardStats();
+        } else {
+            showToast('Ошибка создания: ' + error.message, 'danger');
+        }
         throw error;
     }
 }
@@ -1575,7 +1658,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         });
 
-        // Обработчики карточки (должны быть здесь)
+        // Карточка
         document.getElementById('editBtn')?.addEventListener('click', function() {
             if (!currentDevice) {
                 showToast('Устройство не выбрано', 'warning');
@@ -1663,7 +1746,92 @@ document.addEventListener('DOMContentLoaded', async function() {
             document.getElementById('scrapComment').value = '';
         });
 
-        // Остальные обработчики (оборотная ведомость, отчёт, логи, помощь и т.д.) уже добавлены выше в DOMContentLoaded.
+        document.getElementById('cabinetSelect')?.addEventListener('change', function() {
+            const cabinet = this.value;
+            if (cabinet) {
+                renderChecklist(cabinet);
+            } else {
+                document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Выберите кабинет</div>';
+                document.getElementById('progressText').textContent = '0 из 0';
+                document.getElementById('progressBar').style.width = '0%';
+                document.getElementById('progressBar').textContent = '0%';
+            }
+        });
+        document.getElementById('refreshChecklistBtn')?.addEventListener('click', function() {
+            const cabinet = document.getElementById('cabinetSelect')?.value;
+            if (cabinet) {
+                renderChecklist(cabinet);
+                showToast('Обновлено', 'success');
+            }
+        });
+
+        document.getElementById('downloadCsvBtn')?.addEventListener('click', function() {
+            const cabinetFilter = document.getElementById('reportCabinetFilter')?.value;
+            let filteredData = inventoryData;
+            if (cabinetFilter) {
+                const cabinet = cabinetsData.find(c => c && c.cabinet === cabinetFilter);
+                if (cabinet && Array.isArray(cabinet.inventoryNumbers)) {
+                    const normList = cabinet.inventoryNumbers.map(n => normalizeInventoryNumber(n));
+                    filteredData = inventoryData.filter(d => normList.includes(normalizeInventoryNumber(d.inventoryNumber)));
+                }
+            }
+            const csv = generateCSV(filteredData);
+            if (csv) {
+                downloadCSV(csv);
+            } else {
+                showToast('Нет данных для выгрузки', 'warning');
+            }
+        });
+        document.getElementById('printPdfBtn')?.addEventListener('click', printReport);
+
+        document.getElementById('helpBtn')?.addEventListener('click', function() {
+            const modal = new bootstrap.Modal(document.getElementById('helpModal'));
+            modal.show();
+        });
+
+        document.getElementById('syncNowBtn')?.addEventListener('click', async function() {
+            await syncPendingData();
+            renderLogs();
+        });
+        document.getElementById('clearLogsBtn')?.addEventListener('click', function() {
+            if (confirm('Вы уверены, что хотите очистить все отложенные операции без синхронизации?')) {
+                localStorage.removeItem('pendingScans');
+                localStorage.removeItem('pendingActions');
+                renderLogs();
+                showToast('Логи очищены', 'info');
+            }
+        });
+
+        document.getElementById('confirmCreateDevice')?.addEventListener('click', confirmCreateDevice);
+
+        window.addEventListener('online', function() {
+            syncPendingData();
+            loadInventory().then(() => {
+                updateDashboardStats();
+                if (currentDevice) {
+                    const updated = inventoryData.find(d => d && d.inventoryNumber === currentDevice.inventoryNumber);
+                    if (updated) {
+                        currentDevice = updated;
+                        renderDeviceCard(updated);
+                    }
+                }
+            });
+        });
+
+        setInterval(() => {
+            if (navigator.onLine) {
+                loadInventory().then(() => {
+                    updateDashboardStats();
+                    if (currentDevice) {
+                        const updated = inventoryData.find(d => d && d.inventoryNumber === currentDevice.inventoryNumber);
+                        if (updated) {
+                            currentDevice = updated;
+                            renderDeviceCard(updated);
+                        }
+                    }
+                });
+            }
+        }, 120000);
 
         showScreen('dashboard');
 
