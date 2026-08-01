@@ -1,8 +1,6 @@
 /**
- * app.js – Полная версия с подтверждением сканирования, отдельным листом History,
- * автоопределением форматов, увеличенной областью сканирования, экспериментальным детектором,
- * поддержкой переворота экрана и ВКЛЮЧЕНИЕМ/ВЫКЛЮЧЕНИЕМ ФОНАРИКА (через MediaStreamTrack).
- * ИСПРАВЛЕНА ОСТАНОВКА СКАНЕРА И УПРАВЛЕНИЕ ФОНАРИКОМ.
+ * app.js – Полная версия с новой вкладкой "Таблица" для работы с Google Sheets,
+ * улучшенной оборотной ведомостью (редактирование кабинетов) и фонариком.
  */
 
 // ============================
@@ -40,7 +38,8 @@ let localUserName = localStorage.getItem('localUserName') || 'Аноним';
 let isCreating = false;
 let pendingScanText = '';
 let torchOn = false;
-let torchTrack = null; // для управления фонариком
+let isChecklistEditMode = false;
+let currentChecklistCabinet = null;
 
 // ============================
 // 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -113,6 +112,8 @@ function showScreen(screenId) {
     if (screenId === 'scanner') { initScanner(); } else { stopScanner(); }
     if (screenId === 'dashboard') updateDashboardStats();
     if (screenId === 'logs') renderLogs();
+    if (screenId === 'checklist') renderChecklist(currentChecklistCabinet || document.getElementById('cabinetSelect')?.value);
+    if (screenId === 'data') loadSheetData(document.getElementById('sheetSelect')?.value || 'Inventory');
     setTimeout(updateActivePill, 50);
 }
 
@@ -222,85 +223,38 @@ async function loadInventory() {
     }
 }
 
-async function updateDevice(inventoryNumber, updates) {
-    if (!validateInventoryNumber(inventoryNumber)) {
-        showToast('Неверный формат инвентарного номера', 'danger');
-        throw new Error('Invalid inventory number');
-    }
+// ===== НОВЫЕ ФУНКЦИИ ДЛЯ РАБОТЫ С ТАБЛИЦЕЙ =====
+async function getSheetData(sheetName) {
     try {
-        const result = await callProxy('update', { inventoryNumber, updates });
-        showToast(result.message || 'Устройство обновлено', 'success');
-        const idx = inventoryData.findIndex(d => d && d.inventoryNumber === inventoryNumber);
-        if (idx !== -1) {
-            inventoryData[idx] = { ...inventoryData[idx], ...updates };
-            localStorage.setItem('inventoryCache', JSON.stringify(inventoryData));
-        }
+        const result = await callProxy('getSheetData', { sheetName });
+        return result.data || [];
+    } catch (error) {
+        console.error('Ошибка получения данных листа:', error);
+        showToast('Ошибка загрузки листа: ' + error.message, 'danger');
+        return [];
+    }
+}
+
+async function updateSheetCell(sheetName, row, col, value) {
+    try {
+        const result = await callProxy('updateCell', { sheetName, row, col, value });
+        showToast(result.message || 'Ячейка обновлена', 'success');
         return result;
     } catch (error) {
+        console.error('Ошибка обновления ячейки:', error);
+        showToast('Ошибка обновления: ' + error.message, 'danger');
         throw error;
     }
 }
 
-async function addDevice(deviceData) {
-    const { inventoryNumber, model, serialNumber, status, responsiblePerson, warrantyEndDate } = deviceData;
-    if (!inventoryNumber || !validateInventoryNumber(inventoryNumber)) {
-        showToast('Неверный инвентарный номер', 'danger');
-        throw new Error('Invalid inventory number');
-    }
-    const normalized = normalizeInventoryNumber(inventoryNumber);
-    const localExists = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
-    if (localExists) {
-        showToast('Устройство с таким номером уже существует (локально)', 'warning');
-        throw new Error('Duplicate local');
-    }
-    if (navigator.onLine) {
-        try {
-            const result = await callProxy('read');
-            const serverExists = result.inventory.some(d => {
-                const num = d && d.inventoryNumber ? String(d.inventoryNumber).trim() : '';
-                return normalizeInventoryNumber(num) === normalized;
-            });
-            if (serverExists) {
-                showToast('Устройство с таким номером уже существует в базе', 'warning');
-                await loadInventory();
-                updateDashboardStats();
-                throw new Error('Duplicate server');
-            }
-        } catch (e) {
-            if (e.message && (e.message.includes('уже существует') || e.message.includes('Duplicate'))) throw e;
-            console.warn('Ошибка проверки на сервере, продолжаем создание:', e);
-        }
-    }
+async function updateCabinetList(cabinetName, inventoryNumbers) {
     try {
-        const result = await callProxy('add', {
-            ...deviceData,
-            initiator: getInitiatorName()
-        });
-        showToast(result.message || 'Устройство создано', 'success');
-        const now = new Date().toLocaleString('ru-RU');
-        const newDevice = {
-            inventoryNumber: inventoryNumber,
-            model: model || '',
-            serialNumber: serialNumber || '',
-            status: status || 'В эксплуатации',
-            responsiblePerson: responsiblePerson || '',
-            warrantyEndDate: warrantyEndDate || '',
-            history: `${now} Создано (${getInitiatorName()})`,
-            lastModified: now,
-            initiator: getInitiatorName()
-        };
-        inventoryData.push(newDevice);
-        localStorage.setItem('inventoryCache', JSON.stringify(inventoryData));
-        updateDashboardStats();
+        const result = await callProxy('updateChecklist', { cabinet: cabinetName, inventoryNumbers });
+        showToast(result.message || 'Кабинет обновлён', 'success');
         return result;
     } catch (error) {
-        if (error.message && (error.message.includes('уже существует') || error.message.includes('Duplicate'))) {
-            showToast('Устройство с таким номером уже существует в базе', 'warning');
-            await loadInventory();
-            updateDashboardStats();
-        } else {
-            showToast('Ошибка создания: ' + error.message, 'danger');
-        }
+        console.error('Ошибка обновления кабинета:', error);
+        showToast('Ошибка обновления: ' + error.message, 'danger');
         throw error;
     }
 }
@@ -391,32 +345,6 @@ async function initScanner() {
         const torchBtn = document.getElementById('torchBtn');
         if (torchBtn) torchBtn.style.display = 'flex';
 
-        // Сохраняем трек для фонарика
-        try {
-            const videoElement = readerElement.querySelector('video');
-            if (videoElement && videoElement.srcObject) {
-                const tracks = videoElement.srcObject.getVideoTracks();
-                if (tracks.length > 0) {
-                    torchTrack = tracks[0];
-                    // Проверяем поддержку фонарика
-                    if (typeof torchTrack.getCapabilities === 'function') {
-                        const caps = torchTrack.getCapabilities();
-                        if (caps && caps.torch) {
-                            console.log('Фонарик поддерживается');
-                        } else {
-                            console.log('Фонарик не поддерживается');
-                            torchTrack = null;
-                        }
-                    } else {
-                        torchTrack = null;
-                    }
-                }
-            }
-        } catch (e) {
-            console.warn('Не удалось получить трек для фонарика:', e);
-            torchTrack = null;
-        }
-
     } catch (err) {
         console.error('Ошибка запуска сканера:', err);
         showToast('Не удалось получить доступ к камере: ' + err.message, 'danger');
@@ -425,30 +353,18 @@ async function initScanner() {
     }
 }
 
+// ============================
+// 6.1 ИСПРАВЛЕННАЯ ФУНКЦИЯ ОСТАНОВКИ СКАНЕРА
+// ============================
 function stopScanner() {
     if (!scannerInstance || !isScanning) {
         const torchBtn = document.getElementById('torchBtn');
         if (torchBtn) torchBtn.style.display = 'none';
         torchOn = false;
-        torchTrack = null;
         return;
     }
 
     try {
-        // Выключаем фонарик при остановке
-        if (torchOn && torchTrack) {
-            try {
-                torchTrack.applyConstraints({ advanced: [{ torch: false }] });
-                torchOn = false;
-                const torchBtn = document.getElementById('torchBtn');
-                if (torchBtn) {
-                    torchBtn.innerHTML = '<i class="bi bi-lightbulb"></i> Фонарик';
-                    torchBtn.classList.remove('btn-success');
-                    torchBtn.classList.add('btn-warning');
-                }
-            } catch (e) {}
-        }
-
         if (scannerInstance && typeof scannerInstance.stop === 'function') {
             setTimeout(() => {
                 scannerInstance.stop()
@@ -472,7 +388,6 @@ function stopScanner() {
     const torchBtn = document.getElementById('torchBtn');
     if (torchBtn) torchBtn.style.display = 'none';
     torchOn = false;
-    torchTrack = null;
 }
 
 // ============================
@@ -518,7 +433,7 @@ async function onScanSuccess(decodedText, decodedResult) {
 function onScanError(err) { /* игнорируем */ }
 
 // ============================
-// 8. ОБРАБОТЧИКИ DOM
+// 8. ОБРАБОТЧИКИ DOM (ДОБАВЛЕНЫ НОВЫЕ)
 // ============================
 document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('confirmScanOkBtn')?.addEventListener('click', function() {
@@ -542,32 +457,24 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // ===== ФОНАРИК (через MediaStreamTrack) =====
+    // ===== ФОНАРИК =====
     document.getElementById('torchBtn')?.addEventListener('click', function() {
         if (!scannerInstance) {
             showToast('Сканер не запущен', 'warning');
             return;
         }
-        if (!torchTrack) {
-            showToast('Фонарик не поддерживается на этом устройстве', 'warning');
-            return;
-        }
         try {
-            const newState = !torchOn;
-            torchTrack.applyConstraints({
-                advanced: [{ torch: newState }]
-            }).then(() => {
-                torchOn = newState;
+            if (typeof scannerInstance.toggleTorch === 'function') {
+                scannerInstance.toggleTorch();
+                torchOn = !torchOn;
                 this.innerHTML = torchOn ? 
                     '<i class="bi bi-lightbulb-fill"></i> Выкл' : 
                     '<i class="bi bi-lightbulb"></i> Фонарик';
                 this.classList.toggle('btn-warning', !torchOn);
                 this.classList.toggle('btn-success', torchOn);
-                console.log('Фонарик:', torchOn ? 'ВКЛ' : 'ВЫКЛ');
-            }).catch(err => {
-                console.error('Ошибка переключения фонарика:', err);
-                showToast('Ошибка: ' + err.message, 'danger');
-            });
+            } else {
+                showToast('Фонарик не поддерживается на этом устройстве', 'warning');
+            }
         } catch (e) {
             console.error('Ошибка переключения фонарика:', e);
             showToast('Ошибка: ' + e.message, 'danger');
@@ -592,6 +499,118 @@ document.addEventListener('DOMContentLoaded', function() {
                 }, 300);
             }, 400);
         }
+    });
+
+    // ===== УЛУЧШЕННАЯ ОБОРОТНАЯ ВЕДОМОСТЬ =====
+    document.getElementById('editChecklistBtn')?.addEventListener('click', function() {
+        if (!currentChecklistCabinet) {
+            showToast('Выберите кабинет', 'warning');
+            return;
+        }
+        isChecklistEditMode = true;
+        renderChecklist(currentChecklistCabinet);
+    });
+
+    document.getElementById('saveChecklistBtn')?.addEventListener('click', async function() {
+        if (!currentChecklistCabinet) {
+            showToast('Кабинет не выбран', 'warning');
+            return;
+        }
+        const items = document.querySelectorAll('#checklistItems .list-group-item');
+        const newNumbers = [];
+        items.forEach(item => {
+            const span = item.querySelector('span');
+            if (span) {
+                const num = span.textContent.trim();
+                if (num) newNumbers.push(num);
+            }
+        });
+        const newItemInput = document.getElementById('newChecklistItemInput');
+        if (newItemInput && newItemInput.value.trim()) {
+            const newNum = newItemInput.value.trim();
+            if (!newNumbers.includes(newNum)) {
+                newNumbers.push(newNum);
+            }
+            newItemInput.value = '';
+        }
+        const currentCabinet = cabinetsData.find(c => c.cabinet === currentChecklistCabinet);
+        const currentNumbers = currentCabinet ? currentCabinet.inventoryNumbers : [];
+        const sortedNew = [...newNumbers].sort();
+        const sortedOld = [...currentNumbers].sort();
+        if (JSON.stringify(sortedNew) === JSON.stringify(sortedOld)) {
+            showToast('Нет изменений', 'info');
+            isChecklistEditMode = false;
+            renderChecklist(currentChecklistCabinet);
+            return;
+        }
+        try {
+            await updateCabinetList(currentChecklistCabinet, newNumbers);
+            const cabIdx = cabinetsData.findIndex(c => c.cabinet === currentChecklistCabinet);
+            if (cabIdx !== -1) {
+                cabinetsData[cabIdx].inventoryNumbers = newNumbers;
+                localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
+            }
+            showToast('Кабинет обновлён', 'success');
+            isChecklistEditMode = false;
+            renderChecklist(currentChecklistCabinet);
+        } catch (e) {
+            showToast('Ошибка сохранения: ' + e.message, 'danger');
+        }
+    });
+
+    document.getElementById('addChecklistItemBtn')?.addEventListener('click', function() {
+        const input = document.getElementById('newChecklistItemInput');
+        if (!input || !input.value.trim()) {
+            showToast('Введите инвентарный номер', 'warning');
+            return;
+        }
+        const num = input.value.trim();
+        if (!validateInventoryNumber(num)) {
+            showToast('Неверный формат номера (6-20 символов)', 'danger');
+            return;
+        }
+        const container = document.getElementById('checklistItems');
+        const newItem = document.createElement('div');
+        newItem.className = 'list-group-item d-flex justify-content-between align-items-center list-group-item-light';
+        const exists = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(num));
+        newItem.innerHTML = `
+            <div>
+                <input type="checkbox" class="form-check-input me-2 checklist-item-checkbox" data-inv="${num}">
+                <span>${num}</span>
+            </div>
+            <span class="badge bg-${exists ? 'success' : 'warning'}">${exists ? '✓ Найдено' : '❓ Не найдено'}</span>
+        `;
+        container.appendChild(newItem);
+        input.value = '';
+        showToast('Номер добавлен в список', 'success');
+    });
+
+    document.getElementById('removeSelectedChecklistBtn')?.addEventListener('click', function() {
+        const checked = document.querySelectorAll('.checklist-item-checkbox:checked');
+        if (checked.length === 0) {
+            showToast('Выберите элементы для удаления', 'warning');
+            return;
+        }
+        if (!confirm(`Удалить ${checked.length} элемент(ов)?`)) return;
+        checked.forEach(cb => {
+            const item = cb.closest('.list-group-item');
+            if (item) item.remove();
+        });
+        showToast(`Удалено ${checked.length} элементов`, 'success');
+    });
+
+    // ===== ВКЛАДКА "ТАБЛИЦА" =====
+    document.getElementById('backFromData')?.addEventListener('click', function() {
+        showScreen('dashboard');
+    });
+
+    document.getElementById('sheetSelect')?.addEventListener('change', function() {
+        loadSheetData(this.value);
+    });
+
+    document.getElementById('refreshDataBtn2')?.addEventListener('click', function() {
+        const sheet = document.getElementById('sheetSelect').value;
+        loadSheetData(sheet);
     });
 });
 
@@ -868,15 +887,30 @@ async function loadCabinetSelect() {
 }
 
 function renderChecklist(cabinetName) {
-    if (!cabinetName) return;
+    if (!cabinetName) {
+        document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Выберите кабинет</div>';
+        document.getElementById('progressText').textContent = '0 из 0';
+        document.getElementById('progressBar').style.width = '0%';
+        document.getElementById('progressBar').textContent = '0%';
+        document.getElementById('editChecklistBtn').style.display = 'none';
+        document.getElementById('saveChecklistBtn').style.display = 'none';
+        document.getElementById('checklistEditControls').style.display = 'none';
+        return;
+    }
+
     const cabinet = cabinetsData.find(c => c && c.cabinet === cabinetName);
     if (!cabinet) {
         document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Кабинет не найден</div>';
         document.getElementById('progressText').textContent = '0 из 0';
         document.getElementById('progressBar').style.width = '0%';
         document.getElementById('progressBar').textContent = '0%';
+        document.getElementById('editChecklistBtn').style.display = 'none';
+        document.getElementById('saveChecklistBtn').style.display = 'none';
+        document.getElementById('checklistEditControls').style.display = 'none';
         return;
     }
+
+    currentChecklistCabinet = cabinetName;
 
     const invNumbers = Array.isArray(cabinet.inventoryNumbers) ? cabinet.inventoryNumbers : [];
     let found = 0;
@@ -888,9 +922,13 @@ function renderChecklist(cabinetName) {
         if (exists) found++;
         const statusClass = exists ? 'list-group-item-success' : 'list-group-item-danger';
         const statusText = exists ? '✓ Найдено' : '✗ Не найдено';
+        const checkBox = isChecklistEditMode ? `<input type="checkbox" class="form-check-input me-2 checklist-item-checkbox" data-inv="${num}">` : '';
         itemsHtml += `
             <div class="list-group-item d-flex justify-content-between align-items-center ${statusClass}">
-                <span>${num}</span>
+                <div>
+                    ${checkBox}
+                    <span>${num}</span>
+                </div>
                 <span class="badge bg-${exists ? 'success' : 'danger'}">${statusText}</span>
             </div>
         `;
@@ -903,10 +941,83 @@ function renderChecklist(cabinetName) {
     document.getElementById('progressBar').style.width = percent + '%';
     document.getElementById('progressBar').textContent = percent + '%';
     document.getElementById('progressBar').setAttribute('aria-valuenow', percent);
+
+    document.getElementById('editChecklistBtn').style.display = 'inline-block';
+    document.getElementById('saveChecklistBtn').style.display = 'none';
+    document.getElementById('checklistEditControls').style.display = 'none';
+
+    if (isChecklistEditMode) {
+        document.getElementById('editChecklistBtn').style.display = 'none';
+        document.getElementById('saveChecklistBtn').style.display = 'inline-block';
+        document.getElementById('checklistEditControls').style.display = 'grid';
+        document.querySelectorAll('.checklist-item-checkbox').forEach(cb => cb.checked = false);
+    }
 }
 
 // ============================
-// 13. ОФЛАЙН-РЕЖИМ
+// 13. ЗАГРУЗКА ДАННЫХ ДЛЯ ВКЛАДКИ "ТАБЛИЦА"
+// ============================
+async function loadSheetData(sheetName) {
+    const status = document.getElementById('dataStatus');
+    const tableHead = document.getElementById('dataTableHead');
+    const tableBody = document.getElementById('dataTableBody');
+    status.textContent = 'Загрузка...';
+    try {
+        const data = await getSheetData(sheetName);
+        if (!data || data.length === 0) {
+            tableHead.innerHTML = '';
+            tableBody.innerHTML = '<tr><td class="text-muted">Нет данных</td></tr>';
+            status.textContent = 'Нет данных';
+            return;
+        }
+        const headers = data[0];
+        let theadHtml = '<tr>';
+        headers.forEach(h => {
+            theadHtml += `<th>${h}</th>`;
+        });
+        theadHtml += '</tr>';
+        tableHead.innerHTML = theadHtml;
+
+        let tbodyHtml = '';
+        for (let i = 1; i < data.length; i++) {
+            const row = data[i];
+            tbodyHtml += '<tr>';
+            row.forEach((cell, idx) => {
+                tbodyHtml += `<td contenteditable="true" data-row="${i}" data-col="${idx}" data-sheet="${sheetName}">${cell !== undefined && cell !== null ? cell : ''}</td>`;
+            });
+            tbodyHtml += '</tr>';
+        }
+        tableBody.innerHTML = tbodyHtml;
+        status.textContent = `Загружено ${data.length - 1} строк`;
+
+        document.querySelectorAll('#dataTableBody td[contenteditable="true"]').forEach(td => {
+            td.addEventListener('blur', function() {
+                const newValue = this.textContent.trim();
+                const row = parseInt(this.dataset.row);
+                const col = parseInt(this.dataset.col);
+                const sheet = this.dataset.sheet;
+                const oldValue = this.dataset.oldValue;
+                if (newValue !== oldValue) {
+                    updateSheetCell(sheet, row, col, newValue).catch(() => {
+                        this.textContent = oldValue;
+                    });
+                }
+            });
+            td.addEventListener('focus', function() {
+                this.dataset.oldValue = this.textContent.trim();
+            });
+        });
+
+    } catch (e) {
+        console.error('Ошибка загрузки данных:', e);
+        status.textContent = 'Ошибка: ' + e.message;
+        tableHead.innerHTML = '';
+        tableBody.innerHTML = '<tr><td class="text-danger">Ошибка загрузки</td></tr>';
+    }
+}
+
+// ============================
+// 14. ОФЛАЙН-РЕЖИМ
 // ============================
 function savePendingScan(inventoryNumber, type = 'barcode') {
     let pending = JSON.parse(localStorage.getItem('pendingScans') || '[]');
@@ -1021,7 +1132,7 @@ async function syncPendingData() {
 }
 
 // ============================
-// 14. ЛОГИ
+// 15. ЛОГИ
 // ============================
 function renderLogs() {
     const container = document.getElementById('logsList');
@@ -1094,7 +1205,7 @@ window.createFromLog = function(inventoryNumber) {
 };
 
 // ============================
-// 15. МОДАЛКА СОЗДАНИЯ
+// 16. МОДАЛКА СОЗДАНИЯ
 // ============================
 function showCreateDeviceModal(inventoryNumber) {
     document.getElementById('createInventoryNumber').value = inventoryNumber;
@@ -1197,7 +1308,7 @@ async function confirmCreateDevice() {
 }
 
 // ============================
-// 16. ОТЧЁТ
+// 17. ОТЧЁТ
 // ============================
 function generateCSV(data) {
     if (!data || !Array.isArray(data) || data.length === 0) return '';
@@ -1283,7 +1394,7 @@ function printReport() {
 }
 
 // ============================
-// 17. НАВИГАЦИЯ
+// 18. НАВИГАЦИЯ
 // ============================
 let navButtons = [];
 let activePill = null;
@@ -1302,7 +1413,7 @@ function updateActivePill(smooth = true) {
 }
 
 // ============================
-// 18. ИНИЦИАЛИЗАЦИЯ
+// 19. ИНИЦИАЛИЗАЦИЯ
 // ============================
 document.addEventListener('DOMContentLoaded', async function() {
     const forceHideLoading = setTimeout(() => {
@@ -1421,7 +1532,10 @@ document.addEventListener('DOMContentLoaded', async function() {
             currentDevice = null;
             showScreen('dashboard');
         });
-        document.getElementById('backFromChecklist')?.addEventListener('click', () => showScreen('dashboard'));
+        document.getElementById('backFromChecklist')?.addEventListener('click', () => {
+            isChecklistEditMode = false;
+            showScreen('dashboard');
+        });
         document.getElementById('backFromReport')?.addEventListener('click', () => showScreen('dashboard'));
         document.getElementById('backFromLogs')?.addEventListener('click', () => showScreen('dashboard'));
 
@@ -1461,7 +1575,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         });
 
-        // Карточка
+        // Обработчики карточки (должны быть здесь)
         document.getElementById('editBtn')?.addEventListener('click', function() {
             if (!currentDevice) {
                 showToast('Устройство не выбрано', 'warning');
@@ -1549,92 +1663,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             document.getElementById('scrapComment').value = '';
         });
 
-        document.getElementById('cabinetSelect')?.addEventListener('change', function() {
-            const cabinet = this.value;
-            if (cabinet) {
-                renderChecklist(cabinet);
-            } else {
-                document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Выберите кабинет</div>';
-                document.getElementById('progressText').textContent = '0 из 0';
-                document.getElementById('progressBar').style.width = '0%';
-                document.getElementById('progressBar').textContent = '0%';
-            }
-        });
-        document.getElementById('refreshChecklistBtn')?.addEventListener('click', function() {
-            const cabinet = document.getElementById('cabinetSelect')?.value;
-            if (cabinet) {
-                renderChecklist(cabinet);
-                showToast('Обновлено', 'success');
-            }
-        });
-
-        document.getElementById('downloadCsvBtn')?.addEventListener('click', function() {
-            const cabinetFilter = document.getElementById('reportCabinetFilter')?.value;
-            let filteredData = inventoryData;
-            if (cabinetFilter) {
-                const cabinet = cabinetsData.find(c => c && c.cabinet === cabinetFilter);
-                if (cabinet && Array.isArray(cabinet.inventoryNumbers)) {
-                    const normList = cabinet.inventoryNumbers.map(n => normalizeInventoryNumber(n));
-                    filteredData = inventoryData.filter(d => normList.includes(normalizeInventoryNumber(d.inventoryNumber)));
-                }
-            }
-            const csv = generateCSV(filteredData);
-            if (csv) {
-                downloadCSV(csv);
-            } else {
-                showToast('Нет данных для выгрузки', 'warning');
-            }
-        });
-        document.getElementById('printPdfBtn')?.addEventListener('click', printReport);
-
-        document.getElementById('helpBtn')?.addEventListener('click', function() {
-            const modal = new bootstrap.Modal(document.getElementById('helpModal'));
-            modal.show();
-        });
-
-        document.getElementById('syncNowBtn')?.addEventListener('click', async function() {
-            await syncPendingData();
-            renderLogs();
-        });
-        document.getElementById('clearLogsBtn')?.addEventListener('click', function() {
-            if (confirm('Вы уверены, что хотите очистить все отложенные операции без синхронизации?')) {
-                localStorage.removeItem('pendingScans');
-                localStorage.removeItem('pendingActions');
-                renderLogs();
-                showToast('Логи очищены', 'info');
-            }
-        });
-
-        document.getElementById('confirmCreateDevice')?.addEventListener('click', confirmCreateDevice);
-
-        window.addEventListener('online', function() {
-            syncPendingData();
-            loadInventory().then(() => {
-                updateDashboardStats();
-                if (currentDevice) {
-                    const updated = inventoryData.find(d => d && d.inventoryNumber === currentDevice.inventoryNumber);
-                    if (updated) {
-                        currentDevice = updated;
-                        renderDeviceCard(updated);
-                    }
-                }
-            });
-        });
-
-        setInterval(() => {
-            if (navigator.onLine) {
-                loadInventory().then(() => {
-                    updateDashboardStats();
-                    if (currentDevice) {
-                        const updated = inventoryData.find(d => d && d.inventoryNumber === currentDevice.inventoryNumber);
-                        if (updated) {
-                            currentDevice = updated;
-                            renderDeviceCard(updated);
-                        }
-                    }
-                });
-            }
-        }, 120000);
+        // Остальные обработчики (оборотная ведомость, отчёт, логи, помощь и т.д.) уже добавлены выше в DOMContentLoaded.
 
         showScreen('dashboard');
 

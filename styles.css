@@ -533,6 +533,44 @@ body {
     box-shadow: 0 8px 25px rgba(0,0,0,0.1);
 }
 
+/* ===== ТАБЛИЦА (новая вкладка) ===== */
+#dataTable td {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#dataTable td:focus {
+    outline: 2px solid var(--color-primary);
+    background: #fff;
+    white-space: normal;
+    overflow: visible;
+    max-width: none;
+}
+#dataTable th {
+    position: sticky;
+    top: 0;
+    background: var(--color-card-bg);
+    z-index: 1;
+    border-bottom: 2px solid var(--divider);
+}
+#dataTableContainer {
+    border-radius: 12px;
+    border: 1px solid var(--divider);
+    background: var(--color-card-bg);
+}
+
+/* ===== ОБОРОТНАЯ ВЕДОМОСТЬ (режим редактирования) ===== */
+.checklist-item-checkbox {
+    cursor: pointer;
+}
+#checklistEditControls .input-group {
+    margin-bottom: 0.5rem;
+}
+#checklistEditControls .btn {
+    border-radius: 30px;
+}
+
 /* ===== АДАПТИВ ===== */
 
 /* Планшеты и маленькие ноутбуки */
@@ -573,12 +611,11 @@ body {
     .nav-btn i { font-size: 1.2rem; }
     .btn-content span { display: none; }
 
-    /* Чуть растягиваем карточку "В ремонте" на мобильных */
     .repair-col .stat-card {
-        padding: 12px 10px; /* увеличиваем боковые отступы */
+        padding: 12px 10px;
     }
     .repair-col .stat-number {
-        font-size: 1.9rem; /* немного увеличиваем цифру для лучшего восприятия */
+        font-size: 1.9rem;
     }
 }
 
@@ -698,4 +735,37 @@ body {
     .header-btn i {
         font-size: 1.2rem;
     }
+}
+
+/* ===== ДОПОЛНИТЕЛЬНЫЕ СТИЛИ ДЛЯ ТАБЛИЦЫ (тёмная тема) ===== */
+[data-theme="dark"] #dataTable td:focus {
+    background: #2d2d3f;
+    color: #fff;
+}
+[data-theme="dark"] #dataTable th {
+    background: #1e1e1e;
+    border-bottom-color: rgba(255,255,255,0.1);
+}
+[data-theme="dark"] #dataTableContainer {
+    border-color: rgba(255,255,255,0.1);
+}
+
+/* ===== ДОПОЛНИТЕЛЬНО ДЛЯ ОБОРОТНОЙ ВЕДОМОСТИ ===== */
+#checklistItems .list-group-item {
+    transition: background 0.2s;
+}
+#checklistItems .list-group-item-success {
+    background-color: rgba(76, 175, 80, 0.15);
+}
+#checklistItems .list-group-item-danger {
+    background-color: rgba(244, 67, 54, 0.15);
+}
+#checklistItems .list-group-item-light {
+    background-color: var(--color-card-bg);
+}
+[data-theme="dark"] #checklistItems .list-group-item-success {
+    background-color: rgba(76, 175, 80, 0.25);
+}
+[data-theme="dark"] #checklistItems .list-group-item-danger {
+    background-color: rgba(244, 67, 54, 0.25);
 }
