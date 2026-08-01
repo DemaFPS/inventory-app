@@ -1,6 +1,7 @@
 /**
  * app.js – Полная версия с работающим фонариком и расширенной таблицей
  * (поиск, фильтры, добавление/удаление строк, редактирование ячеек)
+ * Основа: версия с подтверждением сканирования и фонариком через MediaStreamTrack.
  */
 
 // ============================
@@ -38,9 +39,7 @@ let localUserName = localStorage.getItem('localUserName') || 'Аноним';
 let isCreating = false;
 let pendingScanText = '';
 let torchOn = false;
-let isChecklistEditMode = false;
-let currentChecklistCabinet = null;
-let videoTrack = null; // для фонарика через applyConstraints
+let torchTrack = null; // для управления фонариком
 
 // ===== ПЕРЕМЕННЫЕ ДЛЯ ТАБЛИЦЫ =====
 let tableData = [];
@@ -119,7 +118,7 @@ function showScreen(screenId) {
     if (screenId === 'scanner') { initScanner(); } else { stopScanner(); }
     if (screenId === 'dashboard') updateDashboardStats();
     if (screenId === 'logs') renderLogs();
-    if (screenId === 'checklist') renderChecklist(currentChecklistCabinet || document.getElementById('cabinetSelect')?.value);
+    if (screenId === 'checklist') renderChecklist(document.getElementById('cabinetSelect')?.value);
     if (screenId === 'data') loadSheetData(document.getElementById('sheetSelect')?.value || 'Inventory');
     setTimeout(updateActivePill, 50);
 }
@@ -431,28 +430,34 @@ async function initScanner() {
         isInitializingScanner = false;
         console.log('Сканер запущен с поддержкой переворота экрана');
 
-        // ===== ПОЛУЧАЕМ ВИДЕОТРЕК ДЛЯ ФОНАРИКА (если понадобится) =====
+        // Показываем кнопку фонарика
+        const torchBtn = document.getElementById('torchBtn');
+        if (torchBtn) torchBtn.style.display = 'flex';
+
+        // Сохраняем трек для фонарика
         try {
-            const mediaStream = scannerInstance._mediaStream;
-            if (mediaStream) {
-                const tracks = mediaStream.getVideoTracks();
+            const videoElement = readerElement.querySelector('video');
+            if (videoElement && videoElement.srcObject) {
+                const tracks = videoElement.srcObject.getVideoTracks();
                 if (tracks.length > 0) {
-                    videoTrack = tracks[0];
-                    console.log('Видеотрек получен для фонарика (через _mediaStream)');
+                    torchTrack = tracks[0];
+                    // Проверяем поддержку фонарика
+                    if (typeof torchTrack.getCapabilities === 'function') {
+                        const caps = torchTrack.getCapabilities();
+                        if (caps && caps.torch) {
+                            console.log('Фонарик поддерживается');
+                        } else {
+                            console.log('Фонарик не поддерживается');
+                            torchTrack = null;
+                        }
+                    } else {
+                        torchTrack = null;
+                    }
                 }
             }
         } catch (e) {
-            console.warn('Не удалось получить видеотрек через _mediaStream:', e);
-        }
-
-        // ===== ПОКАЗЫВАЕМ КНОПКУ ФОНАРИКА =====
-        const torchBtn = document.getElementById('torchBtn');
-        if (torchBtn) {
-            torchBtn.style.display = 'flex';
-            torchBtn.innerHTML = '<i class="bi bi-lightbulb"></i> Фонарик';
-            torchBtn.classList.remove('btn-success');
-            torchBtn.classList.add('btn-warning');
-            torchOn = false;
+            console.warn('Не удалось получить трек для фонарика:', e);
+            torchTrack = null;
         }
 
     } catch (err) {
@@ -463,46 +468,54 @@ async function initScanner() {
     }
 }
 
-// ============================
-// 6.1 ОСТАНОВКА СКАНЕРА
-// ============================
 function stopScanner() {
     if (!scannerInstance || !isScanning) {
         const torchBtn = document.getElementById('torchBtn');
         if (torchBtn) torchBtn.style.display = 'none';
         torchOn = false;
-        videoTrack = null;
+        torchTrack = null;
         return;
     }
 
     try {
+        // Выключаем фонарик при остановке
+        if (torchOn && torchTrack) {
+            try {
+                torchTrack.applyConstraints({ advanced: [{ torch: false }] });
+                torchOn = false;
+                const torchBtn = document.getElementById('torchBtn');
+                if (torchBtn) {
+                    torchBtn.innerHTML = '<i class="bi bi-lightbulb"></i> Фонарик';
+                    torchBtn.classList.remove('btn-success');
+                    torchBtn.classList.add('btn-warning');
+                }
+            } catch (e) {}
+        }
+
         if (scannerInstance && typeof scannerInstance.stop === 'function') {
             setTimeout(() => {
                 scannerInstance.stop()
                     .then(() => {
                         isScanning = false;
                         console.log('Сканер успешно остановлен');
-                        videoTrack = null;
                     })
                     .catch(err => {
                         console.warn('Ошибка при остановке сканера:', err);
                         isScanning = false;
-                        videoTrack = null;
                     });
             }, 100);
         } else {
             isScanning = false;
-            videoTrack = null;
         }
     } catch (e) {
         console.warn('Исключение при остановке сканера:', e);
         isScanning = false;
-        videoTrack = null;
     }
 
     const torchBtn = document.getElementById('torchBtn');
     if (torchBtn) torchBtn.style.display = 'none';
     torchOn = false;
+    torchTrack = null;
 }
 
 // ============================
@@ -548,7 +561,7 @@ async function onScanSuccess(decodedText, decodedResult) {
 function onScanError(err) { /* игнорируем */ }
 
 // ============================
-// 8. ОБРАБОТЧИКИ DOM (ВКЛЮЧАЯ ФОНАРИК И НОВЫЕ ДЛЯ ТАБЛИЦЫ)
+// 8. ОБРАБОТЧИКИ DOM
 // ============================
 document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('confirmScanOkBtn')?.addEventListener('click', function() {
@@ -572,59 +585,38 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // ===== ФОНАРИК (РАБОТАЕТ ГАРАНТИРОВАННО) =====
+    // ===== ФОНАРИК (через MediaStreamTrack) =====
     document.getElementById('torchBtn')?.addEventListener('click', function() {
-        // Сначала пробуем встроенный метод toggleTorch
-        if (scannerInstance && typeof scannerInstance.toggleTorch === 'function') {
-            try {
-                scannerInstance.toggleTorch();
-                torchOn = !torchOn;
+        if (!scannerInstance) {
+            showToast('Сканер не запущен', 'warning');
+            return;
+        }
+        if (!torchTrack) {
+            showToast('Фонарик не поддерживается на этом устройстве', 'warning');
+            return;
+        }
+        try {
+            const newState = !torchOn;
+            torchTrack.applyConstraints({
+                advanced: [{ torch: newState }]
+            }).then(() => {
+                torchOn = newState;
                 this.innerHTML = torchOn ? 
                     '<i class="bi bi-lightbulb-fill"></i> Выкл' : 
                     '<i class="bi bi-lightbulb"></i> Фонарик';
                 this.classList.toggle('btn-warning', !torchOn);
                 this.classList.toggle('btn-success', torchOn);
-                return;
-            } catch (e) {
-                console.warn('toggleTorch не сработал, пробуем applyConstraints:', e);
-            }
-        }
-
-        // Fallback через MediaStreamTrack
-        if (!videoTrack) {
-            showToast('Видеотрек не найден. Попробуйте перезапустить сканер.', 'warning');
-            return;
-        }
-        try {
-            if (typeof videoTrack.applyConstraints === 'function') {
-                torchOn = !torchOn;
-                const constraints = {
-                    advanced: [{ torch: torchOn }]
-                };
-                videoTrack.applyConstraints(constraints)
-                    .then(() => {
-                        console.log('Фонарик (applyConstraints):', torchOn ? 'включён' : 'выключен');
-                        this.innerHTML = torchOn ? 
-                            '<i class="bi bi-lightbulb-fill"></i> Выкл' : 
-                            '<i class="bi bi-lightbulb"></i> Фонарик';
-                        this.classList.toggle('btn-warning', !torchOn);
-                        this.classList.toggle('btn-success', torchOn);
-                    })
-                    .catch(err => {
-                        console.error('Ошибка applyConstraints:', err);
-                        showToast('Ошибка переключения фонарика: ' + err.message, 'danger');
-                        torchOn = !torchOn;
-                    });
-            } else {
-                showToast('Фонарик не поддерживается на этом устройстве', 'warning');
-            }
+                console.log('Фонарик:', torchOn ? 'ВКЛ' : 'ВЫКЛ');
+            }).catch(err => {
+                console.error('Ошибка переключения фонарика:', err);
+                showToast('Ошибка: ' + err.message, 'danger');
+            });
         } catch (e) {
             console.error('Ошибка переключения фонарика:', e);
             showToast('Ошибка: ' + e.message, 'danger');
         }
     });
 
-    // Перезапуск сканера при изменении размера/ориентации
     window.addEventListener('resize', function() {
         if (document.getElementById('scanner').classList.contains('active')) {
             stopScanner();
@@ -647,19 +639,23 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // ===== УЛУЧШЕННАЯ ОБОРОТНАЯ ВЕДОМОСТЬ =====
     document.getElementById('editChecklistBtn')?.addEventListener('click', function() {
-        if (!currentChecklistCabinet) {
+        const cabinet = document.getElementById('cabinetSelect')?.value;
+        if (!cabinet) {
             showToast('Выберите кабинет', 'warning');
             return;
         }
+        // Включаем режим редактирования
         isChecklistEditMode = true;
-        renderChecklist(currentChecklistCabinet);
+        renderChecklist(cabinet);
     });
 
     document.getElementById('saveChecklistBtn')?.addEventListener('click', async function() {
-        if (!currentChecklistCabinet) {
+        const cabinet = document.getElementById('cabinetSelect')?.value;
+        if (!cabinet) {
             showToast('Кабинет не выбран', 'warning');
             return;
         }
+        // Собираем номера из списка
         const items = document.querySelectorAll('#checklistItems .list-group-item');
         const newNumbers = [];
         items.forEach(item => {
@@ -669,6 +665,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (num) newNumbers.push(num);
             }
         });
+        // Добавляем номер из поля ввода, если есть
         const newItemInput = document.getElementById('newChecklistItemInput');
         if (newItemInput && newItemInput.value.trim()) {
             const newNum = newItemInput.value.trim();
@@ -677,26 +674,27 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             newItemInput.value = '';
         }
-        const currentCabinet = cabinetsData.find(c => c.cabinet === currentChecklistCabinet);
+        // Проверяем изменения
+        const currentCabinet = cabinetsData.find(c => c.cabinet === cabinet);
         const currentNumbers = currentCabinet ? currentCabinet.inventoryNumbers : [];
         const sortedNew = [...newNumbers].sort();
         const sortedOld = [...currentNumbers].sort();
         if (JSON.stringify(sortedNew) === JSON.stringify(sortedOld)) {
             showToast('Нет изменений', 'info');
             isChecklistEditMode = false;
-            renderChecklist(currentChecklistCabinet);
+            renderChecklist(cabinet);
             return;
         }
         try {
-            await updateCabinetList(currentChecklistCabinet, newNumbers);
-            const cabIdx = cabinetsData.findIndex(c => c.cabinet === currentChecklistCabinet);
+            await updateCabinetList(cabinet, newNumbers);
+            const cabIdx = cabinetsData.findIndex(c => c.cabinet === cabinet);
             if (cabIdx !== -1) {
                 cabinetsData[cabIdx].inventoryNumbers = newNumbers;
                 localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
             }
             showToast('Кабинет обновлён', 'success');
             isChecklistEditMode = false;
-            renderChecklist(currentChecklistCabinet);
+            renderChecklist(cabinet);
         } catch (e) {
             showToast('Ошибка сохранения: ' + e.message, 'danger');
         }
@@ -1047,8 +1045,10 @@ function removePendingAction(inventoryNumber) {
 }
 
 // ============================
-// 12. ОБОРОТНАЯ ВЕДОМОСТЬ
+// 12. ОБОРОТНАЯ ВЕДОМОСТЬ (с поддержкой редактирования)
 // ============================
+let isChecklistEditMode = false;
+
 async function loadCabinetSelect() {
     const select = document.getElementById('cabinetSelect');
     if (!select) return;
@@ -1097,8 +1097,6 @@ function renderChecklist(cabinetName) {
         document.getElementById('checklistEditControls').style.display = 'none';
         return;
     }
-
-    currentChecklistCabinet = cabinetName;
 
     const invNumbers = Array.isArray(cabinet.inventoryNumbers) ? cabinet.inventoryNumbers : [];
     let found = 0;
