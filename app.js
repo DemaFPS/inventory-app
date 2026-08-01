@@ -1,9 +1,7 @@
 /**
- * app.js – ФИНАЛЬНАЯ ВЕРСИЯ (исправлена)
- * - Даты корректно форматируются из ISO в ДД.ММ.ГГГГ.
- * - В ведомости статус "Найдено" определяется только по реальным данным из inventoryData.
- * - Убрана фиктивная запись при добавлении номера в ведомость.
- * - Исправлена нормализация номеров.
+ * app.js – ФИНАЛЬНАЯ ВЕРСИЯ (с исправлением статуса "Найдено" в ведомости)
+ * Теперь при добавлении номера в ведомость данные обновляются с сервера,
+ * чтобы статус "Найдено" определялся корректно.
  */
 
 // ============================
@@ -128,9 +126,7 @@ function showScreen(screenId) {
 
 function formatDate(dateStr) {
     if (!dateStr) return '—';
-    // Если уже в формате ДД.ММ.ГГГГ
     if (/^\d{2}\.\d{2}\.\d{4}$/.test(dateStr)) return dateStr;
-    // Попробуем распарсить как ISO или другую строку
     const date = new Date(dateStr);
     if (!isNaN(date.getTime())) {
         const day = String(date.getDate()).padStart(2, '0');
@@ -138,7 +134,6 @@ function formatDate(dateStr) {
         const year = date.getFullYear();
         return `${day}.${month}.${year}`;
     }
-    // Попробуем через parseDateFromString (для формата ДД.ММ.ГГГГ)
     const parsed = parseDateFromString(dateStr);
     if (parsed) {
         const day = String(parsed.getDate()).padStart(2, '0');
@@ -719,7 +714,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         try {
             await updateCabinetList(cabinet, newNumbers);
-            // Обновляем локальные данные из сервера
             await loadInventory();
             showToast('Аудитория обновлена', 'success');
             isChecklistEditMode = false;
@@ -729,6 +723,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    // ИСПРАВЛЕННЫЙ ОБРАБОТЧИК addChecklistItemBtn (с обновлением данных с сервера)
     document.getElementById('addChecklistItemBtn')?.addEventListener('click', async function() {
         const input = document.getElementById('newChecklistItemInput');
         if (!input || !input.value.trim()) {
@@ -745,6 +740,10 @@ document.addEventListener('DOMContentLoaded', function() {
             showToast('Аудитория не выбрана', 'warning');
             return;
         }
+
+        // === ЗАГРУЖАЕМ СВЕЖИЕ ДАННЫЕ С СЕРВЕРА ===
+        await loadInventory(); // обновляем inventoryData и cabinetsData
+
         // Проверяем, есть ли уже такой номер в списке (в DOM)
         const existingItems = document.querySelectorAll('#checklistItems .list-group-item span');
         for (let span of existingItems) {
@@ -773,14 +772,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 cabinetsData[cabIdx].inventoryNumbers = currentNumbers;
                 localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
             }
-            // НЕ добавляем фиктивную запись в inventoryData!
-            // Статус "Найдено" будет определяться по реальным данным
+            // Определяем статус "Найдено" по актуальным данным inventoryData
+            const exists = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(num));
             // Добавляем элемент в DOM
             const container = document.getElementById('checklistItems');
             const newItem = document.createElement('div');
             newItem.className = 'list-group-item d-flex justify-content-between align-items-center list-group-item-light';
-            // Проверяем наличие в реальных данных инвентаризации
-            const exists = inventoryData.some(d => normalizeInventoryNumber(d.inventoryNumber) === normalizeInventoryNumber(num));
             let controls = '';
             if (isChecklistEditMode) {
                 controls = `
@@ -1820,7 +1817,6 @@ function printReport() {
     printDiv.style.display = 'none';
     document.body.appendChild(printDiv);
 
-    // Добавляем стиль для печати
     const style = document.createElement('style');
     style.textContent = `
         @page { size: landscape; margin: 3mm; }
