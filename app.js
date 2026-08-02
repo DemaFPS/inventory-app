@@ -1,15 +1,15 @@
 /**
- * app.js – ИТОГОВАЯ ВЕРСИЯ с ролью по умолчанию "scanner_only"
- * и исправленным бесконечным обновлением ведомости
+ * app.js – ИТОГОВАЯ ВЕРСИЯ
  * 
- * ИСПРАВЛЕНИЯ БАГОВ:
- * 1. В режиме "только сканера" скрыты кнопки "Оборотная ведомость" и "Отчёт" на главном экране
- * 2. Исправлено редактирование ячеек в таблице (смещение индексов устранено в GAS)
- * 3. Смена имени через главный экран теперь обновляет запись в таблице Users
- * 4. В модалке создания устройства селект аудитории по умолчанию показывает "— Не выбрана —"
- * 5. Кнопки "Добавить" и "Удалить выбранные" в ведомости работают только в режиме редактирования
- * 6. Экран загрузки скрывается только ПОСЛЕ загрузки данных (таймаут 30 сек)
- * 7. Ускорена загрузка ведомости: кэш + таймаут 3 сек + фоновое обновление
+ * ИСПРАВЛЕНИЯ:
+ * 1. При добавлении инвентарного номера в ведомость автоматически обновляется аудитория устройства (если отличается)
+ * 2. Улучшена загрузка ведомости: таймаут 10 сек, обработка ошибок, сообщение для пустых аудиторий
+ * 3. Исправлены ошибки 404 и невалидный JSON при загрузке пустых списков
+ * 4. Роль по умолчанию "scanner_only"
+ * 5. Самообновление имени пользователя через главный экран
+ * 6. Ускорена загрузка ведомости: кэш + фоновое обновление
+ * 7. Исправлено смещение индексов в таблице (GAS)
+ * 8. Скрыты кнопки для scanner_only на главном экране
  */
 
 // ============================
@@ -29,9 +29,9 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 
 // ============================
-// 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
+// 1. ПРОКСИ URL
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbxGzjaW2KXz6tbYnOYq8k_FRL3m_7n5CL54VZPcYwfPkTkcVzCBg8Z5sl4G-_gMuAPw/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwkg0UP4wZaSuA-zK3okeGaKyR-t52NSqhUnrJ_MrR9OysBv1G6ZWfNfd59Dbmvy0N1/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -49,7 +49,7 @@ let pendingScanText = '';
 let torchOn = false;
 let torchTrack = null;
 
-// ===== ПЕРЕМЕННЫЕ ДЛЯ ТАБЛИЦЫ =====
+// Таблица
 let tableData = [];
 let tableHeaders = [];
 let tableFilteredData = [];
@@ -57,16 +57,16 @@ let currentSheet = 'Inventory';
 let isLoadingTable = false;
 let searchTimeout = null;
 
-// ===== ПЕРЕМЕННЫЕ ДЛЯ ВЕДОМОСТИ =====
+// Ведомость
 let currentCabinetName = '';
 let currentCabinetNumbers = [];
 let isChecklistEditMode = false;
 let checklistChanged = false;
-let isLoadingChecklist = false; // флаг, чтобы избежать повторных загрузок
+let isLoadingChecklist = false;
 
-// ===== ПЕРЕМЕННЫЕ ДЛЯ РОЛЕЙ =====
+// Роли
 let isAdmin = false;
-let userRole = 'scanner_only'; // по умолчанию
+let userRole = 'scanner_only';
 let userBlocked = false;
 let usersList = [];
 
@@ -427,7 +427,6 @@ async function loadUserRole() {
     const navBtnScanner = document.querySelector('.nav-btn[data-screen="scanner"]');
     const navBtnDashboard = document.querySelector('.nav-btn[data-screen="dashboard"]');
 
-    // Все скрыты по умолчанию
     const allNavBtns = [navBtnUsers, navBtnChecklist, navBtnReport, navBtnLogs, navBtnData, navBtnScanner, navBtnDashboard];
     allNavBtns.forEach(btn => { if (btn) btn.style.display = 'none'; });
 
@@ -1069,7 +1068,7 @@ function removePendingAction(inventoryNumber) {
 }
 
 // ============================
-// 10. ОБОРОТНАЯ ВЕДОМОСТЬ (УСКОРЕННАЯ)
+// 10. ОБОРОТНАЯ ВЕДОМОСТЬ (УСКОРЕННАЯ + ИСПРАВЛЕННАЯ)
 // ============================
 async function loadCabinetSelect() {
     const select = document.getElementById('cabinetSelect');
@@ -1095,7 +1094,7 @@ async function loadCabinetSelect() {
     }
 }
 
-// Ускоренная загрузка ведомости с кэшем и таймаутом
+// Ускоренная загрузка ведомости с кэшем и таймаутом 10 сек
 async function loadChecklistData(cabinetName, forceRefresh = false) {
     if (isLoadingChecklist) return;
     if (!cabinetName) return;
@@ -1130,7 +1129,7 @@ async function loadChecklistData(cabinetName, forceRefresh = false) {
     if (navigator.onLine) {
         try {
             const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Timeout')), 3000)
+                setTimeout(() => reject(new Error('Timeout')), 10000) // увеличено до 10 сек
             );
             const result = await Promise.race([
                 callProxy('getChecklist', { cabinet: cabinetName }),
@@ -1171,6 +1170,10 @@ async function loadChecklistData(cabinetName, forceRefresh = false) {
     renderChecklist(cabinetName);
     if (!navigator.onLine) {
         showToast('Офлайн-режим: данные из кэша', 'warning');
+    } else {
+        if (currentCabinetNumbers.length === 0) {
+            showToast('Нет данных для этой аудитории', 'info');
+        }
     }
     isLoadingChecklist = false;
 }
@@ -1199,6 +1202,7 @@ async function updateChecklistFromServer(cabinetName) {
     }
 }
 
+// Отрисовка ведомости с поддержкой пустого списка
 function renderChecklist(cabinetName) {
     if (!cabinetName) {
         document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Выберите аудиторию</div>';
@@ -1221,6 +1225,24 @@ function renderChecklist(cabinetName) {
                 <div class="mt-2">Загрузка ведомости...</div>
             </div>
         `;
+        return;
+    }
+
+    // Если список пуст – сообщаем об этом
+    if (currentCabinetNumbers.length === 0) {
+        document.getElementById('checklistItems').innerHTML = `
+            <div class="text-center py-4 text-muted">
+                <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+                В этой аудитории нет объектов
+            </div>
+        `;
+        document.getElementById('progressText').textContent = '0 из 0';
+        document.getElementById('progressBar').style.width = '0%';
+        document.getElementById('progressBar').textContent = '0%';
+        // Кнопки редактирования скрываем, т.к. нечего редактировать
+        document.getElementById('editChecklistBtn').style.display = 'none';
+        document.getElementById('saveChecklistBtn').style.display = 'none';
+        document.getElementById('checklistEditControls').style.display = 'none';
         return;
     }
 
@@ -1296,7 +1318,8 @@ function renderChecklist(cabinetName) {
     document.querySelectorAll('.checklist-item-checkbox').forEach(cb => cb.checked = false);
 }
 
-function addNumberToChecklist(number) {
+// Добавление номера с автоматическим обновлением аудитории
+async function addNumberToChecklist(number) {
     number = number.trim();
     if (!number) return;
     if (!validateInventoryNumber(number)) {
@@ -1308,11 +1331,45 @@ function addNumberToChecklist(number) {
         showToast('Такой номер уже есть в списке', 'warning');
         return;
     }
+    // Добавляем номер в список
     currentCabinetNumbers.push(number);
     localStorage.setItem(`checklist_${currentCabinetName}`, JSON.stringify(currentCabinetNumbers));
     checklistChanged = true;
     renderChecklist(currentCabinetName);
     showToast('Номер добавлен (сохраните изменения)', 'success');
+
+    // ---- НОВАЯ ЛОГИКА: обновление аудитории устройства ----
+    // Проверяем, существует ли устройство с таким инвентарным номером
+    const normalizedNumber = normalizeInventoryNumber(number);
+    const device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalizedNumber);
+    if (device) {
+        // Если устройство существует и его аудитория отличается от текущей выбранной
+        if (device.cabinet !== currentCabinetName) {
+            // Проверяем права пользователя (не scanner_only)
+            if (userRole === 'scanner_only') {
+                showToast('У вас нет прав на изменение аудитории устройства', 'warning');
+                return;
+            }
+            // Обновляем аудиторию устройства через updateDevice
+            try {
+                await updateDevice(device.inventoryNumber, { cabinet: currentCabinetName });
+                // Обновляем локальные данные устройства в inventoryData
+                const idx = inventoryData.findIndex(d => normalizeInventoryNumber(d.inventoryNumber) === normalizedNumber);
+                if (idx !== -1) {
+                    inventoryData[idx].cabinet = currentCabinetName;
+                    localStorage.setItem('inventoryCache', JSON.stringify(inventoryData));
+                }
+                showToast(`Аудитория устройства ${number} обновлена на ${currentCabinetName}`, 'success');
+                // Перерисовываем ведомость, чтобы обновить статус "Найдено"
+                renderChecklist(currentCabinetName);
+            } catch (error) {
+                showToast('Не удалось обновить аудиторию устройства: ' + error.message, 'danger');
+            }
+        } else {
+            // Устройство уже в этой аудитории – ничего не делаем
+        }
+    }
+    // ----------------------------------------------------
 }
 
 function removeSelectedNumbers() {
@@ -2210,10 +2267,11 @@ document.addEventListener('DOMContentLoaded', async function() {
                 if (currentUser) {
                     try {
                         await currentUser.updateProfile({ displayName: name });
+                        // Обновляем имя в таблице Users (самообновление)
                         await callProxy('updateUser', { 
                             uid: currentUser.uid, 
                             displayName: name, 
-                            adminUid: currentUser.uid 
+                            adminUid: currentUser.uid // self-update
                         });
                     } catch (e) {
                         console.warn('Не удалось обновить имя в таблице Users:', e);
@@ -2397,7 +2455,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             saveChecklistChanges();
         });
 
-        document.getElementById('addChecklistItemBtn')?.addEventListener('click', function() {
+        document.getElementById('addChecklistItemBtn')?.addEventListener('click', async function() {
             if (userRole === 'scanner_only') {
                 showToast('У вас нет прав на добавление', 'warning');
                 return;
@@ -2412,7 +2470,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 return;
             }
             const num = input.value.trim();
-            addNumberToChecklist(num);
+            await addNumberToChecklist(num);
             input.value = '';
         });
 
