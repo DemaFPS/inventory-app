@@ -1,5 +1,6 @@
 /**
- * app.js – ИТОГОВАЯ ВЕРСИЯ с ролями, блокировкой, управлением пользователями
+ * app.js – ИТОГОВАЯ ВЕРСИЯ с ролью по умолчанию "scanner_only"
+ * и исправленным бесконечным обновлением ведомости
  */
 
 // ============================
@@ -21,7 +22,7 @@ const auth = firebase.auth();
 // ============================
 // 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbxepmXazN40QjkVWXiR5VbeKPyzrvD0kSYQHuN6Zgb8K9MVoklmtVyS8i8R0Kb94FAO/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycby_fo2WPnW3QPe6fEWn8vCpJhEluLs_Jy-R_uvSt8IALoFVVCSmlMtz9oS3a6UUcDa_/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -52,10 +53,11 @@ let currentCabinetName = '';
 let currentCabinetNumbers = [];
 let isChecklistEditMode = false;
 let checklistChanged = false;
+let isLoadingChecklist = false; // флаг, чтобы избежать повторных загрузок
 
 // ===== ПЕРЕМЕННЫЕ ДЛЯ РОЛЕЙ =====
 let isAdmin = false;
-let userRole = 'user';
+let userRole = 'scanner_only'; // по умолчанию
 let userBlocked = false;
 let usersList = [];
 
@@ -132,7 +134,7 @@ function showScreen(screenId) {
     if (screenId === 'logs') renderLogs();
     if (screenId === 'checklist') {
         const cabinet = document.getElementById('cabinetSelect')?.value;
-        if (cabinet) loadChecklistData(cabinet);
+        if (cabinet) loadChecklistData(cabinet, false);
     }
     if (screenId === 'data') loadSheetData(document.getElementById('sheetSelect')?.value || 'Inventory');
     setTimeout(updateActivePill, 50);
@@ -399,7 +401,7 @@ async function loadUserRole() {
   const displayName = currentUser.displayName || localUserName || 'Аноним';
   try {
     const result = await callProxy('getUserRole', { uid, displayName });
-    userRole = result.role || 'user';
+    userRole = result.role || 'scanner_only';
     userBlocked = result.blocked === true;
     
     if (userBlocked) {
@@ -407,7 +409,7 @@ async function loadUserRole() {
       return;
     }
 
-    // Настройка навигации в зависимости от роли
+    // Настройка навигации
     const navBtnUsers = document.querySelector('.nav-btn[data-screen="users"]');
     const navBtnChecklist = document.querySelector('.nav-btn[data-screen="checklist"]');
     const navBtnReport = document.querySelector('.nav-btn[data-screen="report"]');
@@ -416,20 +418,24 @@ async function loadUserRole() {
     const navBtnScanner = document.querySelector('.nav-btn[data-screen="scanner"]');
     const navBtnDashboard = document.querySelector('.nav-btn[data-screen="dashboard"]');
 
-    // По умолчанию все скрыты
+    // Все скрыты по умолчанию
     const allNavBtns = [navBtnUsers, navBtnChecklist, navBtnReport, navBtnLogs, navBtnData, navBtnScanner, navBtnDashboard];
     allNavBtns.forEach(btn => { if (btn) btn.style.display = 'none'; });
 
-    if (userRole === 'admin') {
+    let effectiveRole = userRole;
+    // Если пришла роль 'user' – считаем как scanner_only
+    if (effectiveRole === 'user') effectiveRole = 'scanner_only';
+
+    if (effectiveRole === 'admin') {
       allNavBtns.forEach(btn => { if (btn) btn.style.display = 'flex'; });
       isAdmin = true;
-    } else if (userRole === 'full' || userRole === 'user') {
+    } else if (effectiveRole === 'full') {
       [navBtnChecklist, navBtnReport, navBtnLogs, navBtnData, navBtnScanner, navBtnDashboard].forEach(btn => {
         if (btn) btn.style.display = 'flex';
       });
       if (navBtnUsers) navBtnUsers.style.display = 'none';
       isAdmin = false;
-    } else { // 'scanner_only'
+    } else { // scanner_only или неизвестная
       if (navBtnDashboard) navBtnDashboard.style.display = 'flex';
       if (navBtnScanner) navBtnScanner.style.display = 'flex';
       isAdmin = false;
@@ -438,7 +444,7 @@ async function loadUserRole() {
     console.log('Роль пользователя:', userRole, 'Заблокирован:', userBlocked);
   } catch (error) {
     console.warn('Ошибка получения роли:', error);
-    userRole = 'user';
+    userRole = 'scanner_only';
     userBlocked = false;
     isAdmin = false;
     document.querySelector('.nav-btn[data-screen="dashboard"]').style.display = 'flex';
@@ -773,7 +779,6 @@ async function onScanSuccess(decodedText, decodedResult) {
 function onScanError(err) { /* игнорируем */ }
 
 async function processScannedBarcode(rawText) {
-    // Для scanner_only: только просмотр, без создания
     const normalized = normalizeInventoryNumber(rawText);
     let device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
     if (device) {
@@ -1045,7 +1050,7 @@ function removePendingAction(inventoryNumber) {
 }
 
 // ============================
-// 10. ОБОРОТНАЯ ВЕДОМОСТЬ
+// 10. ОБОРОТНАЯ ВЕДОМОСТЬ (с исправлением бесконечного цикла)
 // ============================
 async function loadCabinetSelect() {
     const select = document.getElementById('cabinetSelect');
@@ -1072,7 +1077,15 @@ async function loadCabinetSelect() {
 }
 
 async function loadChecklistData(cabinetName, forceRefresh = false) {
+    // Защита от повторного вызова
+    if (isLoadingChecklist) return;
     if (!cabinetName) return;
+    // Если уже загружена та же аудитория и не принудительно – выходим
+    if (cabinetName === currentCabinetName && !forceRefresh && currentCabinetNumbers.length > 0) {
+        return;
+    }
+
+    isLoadingChecklist = true;
     currentCabinetName = cabinetName;
 
     const cacheKey = `checklist_${cabinetName}`;
@@ -1083,9 +1096,11 @@ async function loadChecklistData(cabinetName, forceRefresh = false) {
             if (Array.isArray(parsed)) {
                 currentCabinetNumbers = parsed;
                 renderChecklist(cabinetName);
+                // Фоновое обновление с сервера (если есть интернет)
                 if (navigator.onLine) {
                     updateChecklistFromServer(cabinetName);
                 }
+                isLoadingChecklist = false;
                 return;
             }
         } catch (e) {}
@@ -1099,6 +1114,7 @@ async function loadChecklistData(cabinetName, forceRefresh = false) {
         renderChecklist(cabinetName);
         showToast('Офлайн-режим: изменения будут сохранены локально', 'warning');
     }
+    isLoadingChecklist = false;
 }
 
 async function updateChecklistFromServer(cabinetName) {
@@ -1119,6 +1135,7 @@ async function updateChecklistFromServer(cabinetName) {
         }
     } catch (error) {
         console.warn('Не удалось обновить ведомость с сервера:', error);
+        // Если ошибка, но есть кэш – используем его
         const cached = localStorage.getItem(`checklist_${cabinetName}`);
         if (cached) {
             try {
@@ -1198,6 +1215,7 @@ function renderChecklist(cabinetName) {
         document.getElementById('checklistEditControls').style.display = 'none';
     }
 
+    // Обработчики для кнопок удаления (пересоздаются при каждом рендере)
     document.querySelectorAll('.remove-checklist-item').forEach(btn => {
         btn.addEventListener('click', function(e) {
             e.stopPropagation();
@@ -1296,7 +1314,7 @@ async function saveChecklistChanges() {
 }
 
 // ============================
-// 11. ТАБЛИЦА (вкладка)
+// 11. ТАБЛИЦА
 // ============================
 async function loadSheetData(sheetName) {
     if (isLoadingTable) return;
@@ -2261,7 +2279,13 @@ document.addEventListener('DOMContentLoaded', async function() {
                     document.getElementById('saveChecklistBtn').style.display = 'none';
                     document.getElementById('checklistEditControls').style.display = 'none';
                 }
-                loadChecklistData(cabinet);
+                // Принудительная загрузка, если аудитория изменилась
+                if (cabinet !== currentCabinetName) {
+                    loadChecklistData(cabinet, true);
+                } else {
+                    // Если та же аудитория, просто обновляем отображение (возможно, изменились данные)
+                    renderChecklist(cabinet);
+                }
             } else {
                 document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Выберите аудиторию</div>';
                 document.getElementById('progressText').textContent = '0 из 0';
