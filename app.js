@@ -1,11 +1,5 @@
 /**
- * app.js – ИТОГОВАЯ ВЕРСИЯ (с исправлениями дат и печати)
- * 
- * Исправления:
- * - В таблице (вкладка «Таблица») колонки с датами автоматически форматируются в ДД.ММ.ГГГГ.
- * - Колонка «История перемещений» показывает только последнее событие и не редактируется.
- * - Печать отчёта адаптирована под мобильные устройства, таблица занимает всю ширину страницы.
- * - Остальные исправления: уникализация номеров, проверка дубликатов, офлайн-режим и т.д.
+ * app.js – ИТОГОВАЯ ВЕРСИЯ с ролями, обновлённой ведомостью и оптимизациями
  */
 
 // ============================
@@ -27,7 +21,7 @@ const auth = firebase.auth();
 // ============================
 // 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbytASKu_mZ2PkuxDxI0-yaeMIgO26SDQ-Whnw4teZqWrbBkZWCkZ7m0dWNAn4eBrr3a/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbyTRH8-uJS4xQMr3qgyZfr5BL2jlMCaC5Yhu0-RGdM27taNNy7s4-R_rMVWCEpacXj-/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -51,6 +45,17 @@ let tableHeaders = [];
 let tableFilteredData = [];
 let currentSheet = 'Inventory';
 let isLoadingTable = false;
+let searchTimeout = null;
+
+// ===== ПЕРЕМЕННЫЕ ДЛЯ ВЕДОМОСТИ =====
+let currentCabinetName = '';
+let currentCabinetNumbers = [];
+let isChecklistEditMode = false;
+let checklistChanged = false;
+
+// ===== ПЕРЕМЕННЫЕ ДЛЯ РОЛЕЙ =====
+let isAdmin = false;
+let usersList = [];
 
 // ============================
 // 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -123,7 +128,10 @@ function showScreen(screenId) {
     if (screenId === 'scanner') { initScanner(); } else { stopScanner(); }
     if (screenId === 'dashboard') updateDashboardStats();
     if (screenId === 'logs') renderLogs();
-    if (screenId === 'checklist') renderChecklist(document.getElementById('cabinetSelect')?.value);
+    if (screenId === 'checklist') {
+        const cabinet = document.getElementById('cabinetSelect')?.value;
+        if (cabinet) loadChecklistData(cabinet);
+    }
     if (screenId === 'data') loadSheetData(document.getElementById('sheetSelect')?.value || 'Inventory');
     setTimeout(updateActivePill, 50);
 }
@@ -365,32 +373,6 @@ async function addDevice(deviceData) {
     }
 }
 
-// ============================
-// 5. ФУНКЦИИ ДЛЯ ТАБЛИЦЫ
-// ============================
-async function getSheetData(sheetName) {
-    try {
-        const result = await callProxy('getSheetData', { sheetName });
-        return result.data || [];
-    } catch (error) {
-        console.error('Ошибка получения данных листа:', error);
-        showToast('Ошибка загрузки листа: ' + error.message, 'danger');
-        return [];
-    }
-}
-
-async function updateSheetCell(sheetName, row, col, value) {
-    try {
-        const result = await callProxy('updateCell', { sheetName, row, col, value });
-        showToast(result.message || 'Ячейка обновлена', 'success');
-        return result;
-    } catch (error) {
-        console.error('Ошибка обновления ячейки:', error);
-        showToast('Ошибка обновления: ' + error.message, 'danger');
-        throw error;
-    }
-}
-
 async function updateCabinetList(cabinetName, inventoryNumbers) {
     const unique = uniqueArray(inventoryNumbers);
     try {
@@ -399,9 +381,132 @@ async function updateCabinetList(cabinetName, inventoryNumbers) {
         return result;
     } catch (error) {
         console.error('Ошибка обновления аудитории:', error);
-        showToast('Ошибка обновления: ' + error.message, 'danger');
-        throw error;
+        if (error.message && !error.message.includes('404')) {
+            showToast('Ошибка обновления: ' + error.message, 'danger');
+        }
+        return null;
     }
+}
+
+// ============================
+// 5. ФУНКЦИИ ДЛЯ РОЛЕЙ
+// ============================
+async function loadUserRole() {
+  if (!currentUser) return;
+  const uid = currentUser.uid;
+  const displayName = currentUser.displayName || localUserName || 'Аноним';
+  try {
+    const result = await callProxy('getUserRole', { uid, displayName });
+    if (result && result.role === 'admin') {
+      isAdmin = true;
+      document.querySelector('.nav-btn[data-screen="users"]').style.display = 'flex';
+    } else {
+      isAdmin = false;
+      document.querySelector('.nav-btn[data-screen="users"]').style.display = 'none';
+    }
+    console.log('Роль пользователя:', isAdmin ? 'admin' : 'user');
+  } catch (error) {
+    console.warn('Ошибка получения роли:', error);
+    isAdmin = false;
+  }
+}
+
+async function promoteToAdmin() {
+  if (!currentUser) {
+    showToast('Пользователь не авторизован', 'warning');
+    return;
+  }
+  const password = prompt('Введите мастер-пароль для получения прав администратора:');
+  if (!password) return;
+  try {
+    const result = await callProxy('promoteToAdmin', { uid: currentUser.uid, masterPassword: password });
+    showToast(result.message || 'Вы стали администратором!', 'success');
+    isAdmin = true;
+    document.querySelector('.nav-btn[data-screen="users"]').style.display = 'flex';
+  } catch (error) {
+    showToast('Ошибка: ' + error.message, 'danger');
+  }
+}
+
+async function loadUsers() {
+  if (!isAdmin) {
+    showToast('Доступ запрещён', 'warning');
+    return;
+  }
+  try {
+    const result = await callProxy('getUsers', { uid: currentUser.uid });
+    usersList = result.users || [];
+    renderUsersTable(usersList);
+  } catch (error) {
+    showToast('Ошибка загрузки пользователей: ' + error.message, 'danger');
+  }
+}
+
+function renderUsersTable(users) {
+  const container = document.getElementById('usersTableBody');
+  if (!container) return;
+  if (!users || users.length === 0) {
+    container.innerHTML = '<tr><td colspan="4" class="text-muted">Нет пользователей</td></tr>';
+    return;
+  }
+  let html = '';
+  users.forEach((user, index) => {
+    html += `
+      <tr>
+        <td>${index + 1}</td>
+        <td>${user.displayName || 'Без имени'}</td>
+        <td>
+          <select class="form-select form-select-sm user-role-select" data-uid="${user.uid}">
+            <option value="user" ${user.role === 'user' ? 'selected' : ''}>Пользователь</option>
+            <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Администратор</option>
+          </select>
+        </td>
+        <td>
+          <button class="btn btn-sm btn-outline-danger delete-user-btn" data-uid="${user.uid}">Удалить</button>
+        </td>
+      </tr>
+    `;
+  });
+  container.innerHTML = html;
+
+  document.querySelectorAll('.user-role-select').forEach(select => {
+    select.addEventListener('change', async function() {
+      const uid = this.dataset.uid;
+      const newRole = this.value;
+      await updateUserRole(uid, newRole);
+    });
+  });
+
+  document.querySelectorAll('.delete-user-btn').forEach(btn => {
+    btn.addEventListener('click', async function() {
+      const uid = this.dataset.uid;
+      if (confirm('Удалить пользователя?')) {
+        await deleteUser(uid);
+      }
+    });
+  });
+}
+
+async function updateUserRole(uid, newRole) {
+  if (!isAdmin) return;
+  try {
+    await callProxy('updateUserRole', { uid, newRole, adminUid: currentUser.uid });
+    showToast('Роль обновлена', 'success');
+    await loadUsers();
+  } catch (error) {
+    showToast('Ошибка: ' + error.message, 'danger');
+  }
+}
+
+async function deleteUser(uid) {
+  if (!isAdmin) return;
+  try {
+    await callProxy('deleteUser', { uid, adminUid: currentUser.uid });
+    showToast('Пользователь удалён', 'success');
+    await loadUsers();
+  } catch (error) {
+    showToast('Ошибка: ' + error.message, 'danger');
+  }
 }
 
 // ============================
@@ -605,335 +710,6 @@ async function onScanSuccess(decodedText, decodedResult) {
 
 function onScanError(err) { /* игнорируем */ }
 
-// ============================
-// 9. ФУНКЦИЯ: ОБЕСПЕЧИТЬ АКТИВНЫЙ СТАТУС И АУДИТОРИЮ
-// ============================
-async function ensureDeviceActiveAndInCabinet(inventoryNumber, cabinet) {
-    const normalized = normalizeInventoryNumber(inventoryNumber);
-    const device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
-    if (!device) {
-        await addDevice({
-            inventoryNumber: inventoryNumber,
-            cabinet: cabinet,
-            model: '',
-            serialNumber: '',
-            status: 'В эксплуатации',
-            responsiblePerson: '',
-            warrantyEndDate: ''
-        });
-        return true;
-    } else {
-        let updates = {};
-        let needUpdate = false;
-        if (device.status !== 'В эксплуатации') {
-            updates.status = 'В эксплуатации';
-            needUpdate = true;
-        }
-        if (device.cabinet !== cabinet) {
-            updates.cabinet = cabinet;
-            needUpdate = true;
-        }
-        if (needUpdate) {
-            const now = new Date().toLocaleString('ru-RU');
-            const historyEntry = `${now} Добавлен в аудиторию ${cabinet} (статус изменён на "В эксплуатации") (${getInitiatorName()})`;
-            updates.history = (device.history || '') + (device.history ? '; ' : '') + historyEntry;
-            updates.lastModified = now;
-            updates.initiator = getInitiatorName();
-            await updateDevice(inventoryNumber, updates);
-            const idx = inventoryData.findIndex(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
-            if (idx !== -1) {
-                inventoryData[idx] = { ...inventoryData[idx], ...updates };
-                localStorage.setItem('inventoryCache', JSON.stringify(inventoryData));
-            }
-            showToast(`Устройство ${inventoryNumber} обновлено (статус → "В эксплуатации", аудитория → ${cabinet})`, 'success');
-            return true;
-        }
-        return false;
-    }
-}
-
-// ============================
-// 10. ОБРАБОТЧИКИ DOM
-// ============================
-document.addEventListener('DOMContentLoaded', function() {
-    document.getElementById('confirmScanOkBtn')?.addEventListener('click', function() {
-        const input = document.getElementById('confirmScanInput');
-        let value = input.value.trim();
-        if (!value) {
-            showToast('Номер не может быть пустым', 'warning');
-            return;
-        }
-        const modal = bootstrap.Modal.getInstance(document.getElementById('confirmScanModal'));
-        if (modal) modal.hide();
-        processScannedBarcode(value);
-    });
-    document.getElementById('confirmScanEditBtn')?.addEventListener('click', function() {
-        document.getElementById('confirmScanInput').focus();
-        document.getElementById('confirmScanInput').select();
-    });
-    document.getElementById('confirmScanInput')?.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') {
-            document.getElementById('confirmScanOkBtn').click();
-        }
-    });
-
-    document.getElementById('torchBtn')?.addEventListener('click', function() {
-        if (!scannerInstance) {
-            showToast('Сканер не запущен', 'warning');
-            return;
-        }
-        if (!torchTrack) {
-            showToast('Фонарик не поддерживается на этом устройстве', 'warning');
-            return;
-        }
-        try {
-            const newState = !torchOn;
-            torchTrack.applyConstraints({
-                advanced: [{ torch: newState }]
-            }).then(() => {
-                torchOn = newState;
-                this.innerHTML = torchOn ? 
-                    '<i class="bi bi-lightbulb-fill"></i> Выкл' : 
-                    '<i class="bi bi-lightbulb"></i> Фонарик';
-                this.classList.toggle('btn-warning', !torchOn);
-                this.classList.toggle('btn-success', torchOn);
-                console.log('Фонарик:', torchOn ? 'ВКЛ' : 'ВЫКЛ');
-            }).catch(err => {
-                console.error('Ошибка переключения фонарика:', err);
-                showToast('Ошибка: ' + err.message, 'danger');
-            });
-        } catch (e) {
-            console.error('Ошибка переключения фонарика:', e);
-            showToast('Ошибка: ' + e.message, 'danger');
-        }
-    });
-
-    window.addEventListener('resize', function() {
-        if (document.getElementById('scanner').classList.contains('active')) {
-            stopScanner();
-            setTimeout(() => {
-                initScanner();
-            }, 300);
-        }
-    });
-
-    window.addEventListener('orientationchange', function() {
-        if (document.getElementById('scanner').classList.contains('active')) {
-            setTimeout(() => {
-                stopScanner();
-                setTimeout(() => {
-                    initScanner();
-                }, 300);
-            }, 400);
-        }
-    });
-
-    // ===== ОБОРОТНАЯ ВЕДОМОСТЬ =====
-    document.getElementById('editChecklistBtn')?.addEventListener('click', function() {
-        const cabinet = document.getElementById('cabinetSelect')?.value;
-        if (!cabinet) {
-            showToast('Выберите аудиторию', 'warning');
-            return;
-        }
-        isChecklistEditMode = true;
-        renderChecklist(cabinet);
-    });
-
-    document.getElementById('addChecklistItemBtn')?.addEventListener('click', async function() {
-        const input = document.getElementById('newChecklistItemInput');
-        if (!input || !input.value.trim()) {
-            showToast('Введите инвентарный номер', 'warning');
-            return;
-        }
-        const num = input.value.trim();
-        if (!validateInventoryNumber(num)) {
-            showToast('Неверный формат номера (6-20 символов)', 'danger');
-            return;
-        }
-        const cabinet = document.getElementById('cabinetSelect')?.value;
-        if (!cabinet) {
-            showToast('Аудитория не выбрана', 'warning');
-            return;
-        }
-
-        await loadInventory();
-
-        const currentCabinet = cabinetsData.find(c => c.cabinet === cabinet);
-        const currentNumbers = currentCabinet ? currentCabinet.inventoryNumbers : [];
-        if (currentNumbers.some(n => normalizeInventoryNumber(n) === normalizeInventoryNumber(num))) {
-            showToast('Такой номер уже есть в списке аудитории', 'warning');
-            return;
-        }
-
-        await ensureDeviceActiveAndInCabinet(num, cabinet);
-
-        await loadInventory();
-
-        const updatedCabinet = cabinetsData.find(c => c.cabinet === cabinet);
-        const updatedNumbers = updatedCabinet ? updatedCabinet.inventoryNumbers : [];
-        if (updatedNumbers.some(n => normalizeInventoryNumber(n) === normalizeInventoryNumber(num))) {
-            renderChecklist(cabinet);
-            input.value = '';
-            showToast('Номер уже присутствует в списке', 'info');
-            return;
-        }
-
-        const newNumbers = uniqueArray([...updatedNumbers, num]);
-        await updateCabinetList(cabinet, newNumbers);
-        const cabIdx = cabinetsData.findIndex(c => c.cabinet === cabinet);
-        if (cabIdx !== -1) {
-            cabinetsData[cabIdx].inventoryNumbers = newNumbers;
-        } else {
-            cabinetsData.push({ cabinet, inventoryNumbers: newNumbers });
-        }
-        localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
-
-        renderChecklist(cabinet);
-        input.value = '';
-        showToast('Номер добавлен в список', 'success');
-    });
-
-    document.getElementById('removeSelectedChecklistBtn')?.addEventListener('click', function() {
-        const checked = document.querySelectorAll('.checklist-item-checkbox:checked');
-        if (checked.length === 0) {
-            showToast('Выберите элементы для удаления', 'warning');
-            return;
-        }
-        if (!confirm(`Удалить ${checked.length} элемент(ов)?`)) return;
-        const cabinet = document.getElementById('cabinetSelect')?.value;
-        if (!cabinet) {
-            showToast('Аудитория не выбрана', 'warning');
-            return;
-        }
-        const items = document.querySelectorAll('#checklistItems .list-group-item span');
-        const numbers = [];
-        items.forEach(span => {
-            const num = span.textContent.trim();
-            if (num) numbers.push(num);
-        });
-        checked.forEach(cb => {
-            const item = cb.closest('.list-group-item');
-            if (item) item.remove();
-        });
-        const finalNumbers = [];
-        document.querySelectorAll('#checklistItems .list-group-item span').forEach(span => {
-            const num = span.textContent.trim();
-            if (num) finalNumbers.push(num);
-        });
-        const uniqueFinal = uniqueArray(finalNumbers);
-        updateCabinetList(cabinet, uniqueFinal).then(() => {
-            const cabIdx = cabinetsData.findIndex(c => c.cabinet === cabinet);
-            if (cabIdx !== -1) {
-                cabinetsData[cabIdx].inventoryNumbers = uniqueFinal;
-            }
-            localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
-            renderChecklist(cabinet);
-            showToast(`Удалено ${checked.length} элементов`, 'success');
-        }).catch(e => {
-            showToast('Ошибка удаления: ' + e.message, 'danger');
-        });
-    });
-
-    // ===== ВКЛАДКА "ТАБЛИЦА" =====
-    document.getElementById('backFromData')?.addEventListener('click', function() {
-        showScreen('dashboard');
-    });
-
-    document.getElementById('sheetSelect')?.addEventListener('change', function() {
-        currentSheet = this.value;
-        loadSheetData(this.value);
-    });
-
-    document.getElementById('refreshDataBtn2')?.addEventListener('click', function() {
-        const sheet = document.getElementById('sheetSelect').value;
-        loadSheetData(sheet);
-    });
-
-    document.getElementById('tableSearchInput')?.addEventListener('input', function() {
-        applyFiltersAndSearch();
-    });
-
-    document.getElementById('addRowBtn')?.addEventListener('click', async function() {
-        if (!tableHeaders.length) {
-            showToast('Сначала загрузите данные', 'warning');
-            return;
-        }
-        const newRow = new Array(tableHeaders.length).fill('');
-        const sheet = document.getElementById('sheetSelect').value;
-        try {
-            const result = await callProxy('addRow', { sheetName: sheet, rowData: newRow });
-            showToast(result.message || 'Строка добавлена', 'success');
-            loadSheetData(sheet);
-        } catch (e) {
-            showToast('Ошибка добавления: ' + e.message, 'danger');
-        }
-    });
-
-    document.getElementById('deleteRowsBtn')?.addEventListener('click', async function() {
-        const checked = document.querySelectorAll('.row-selector:checked');
-        if (checked.length === 0) {
-            showToast('Выберите строки для удаления', 'warning');
-            return;
-        }
-        if (!confirm(`Удалить ${checked.length} строк(и)?`)) return;
-        const rowIndices = Array.from(checked).map(cb => parseInt(cb.dataset.sheetRow)).filter(idx => !isNaN(idx) && idx > 0);
-        if (rowIndices.length === 0) {
-            showToast('Не удалось определить номера строк', 'danger');
-            return;
-        }
-        const sheet = document.getElementById('sheetSelect').value;
-        try {
-            const result = await callProxy('deleteRows', { sheetName: sheet, rowIndices: rowIndices });
-            showToast(result.message || 'Строки удалены', 'success');
-            loadSheetData(sheet);
-        } catch (e) {
-            showToast('Ошибка удаления: ' + e.message, 'danger');
-        }
-    });
-
-    const createModal = document.getElementById('createDeviceModal');
-    if (createModal) {
-        createModal.addEventListener('show.bs.modal', function() {
-            const select = document.getElementById('createCabinet');
-            if (select) {
-                select.innerHTML = '<option value="">— Не выбрана —</option>';
-                cabinetsData.forEach(cab => {
-                    if (cab && cab.cabinet) {
-                        const opt = document.createElement('option');
-                        opt.value = cab.cabinet;
-                        opt.textContent = cab.cabinet;
-                        select.appendChild(opt);
-                    }
-                });
-            }
-        });
-    }
-
-    const editModal = document.getElementById('editModal');
-    if (editModal) {
-        editModal.addEventListener('show.bs.modal', function() {
-            const select = document.getElementById('editCabinet');
-            if (select) {
-                select.innerHTML = '<option value="">— Не выбрана —</option>';
-                cabinetsData.forEach(cab => {
-                    if (cab && cab.cabinet) {
-                        const opt = document.createElement('option');
-                        opt.value = cab.cabinet;
-                        opt.textContent = cab.cabinet;
-                        if (currentDevice && currentDevice.cabinet === cab.cabinet) {
-                            opt.selected = true;
-                        }
-                        select.appendChild(opt);
-                    }
-                });
-            }
-        });
-    }
-});
-
-// ============================
-// 11. ОБРАБОТКА ШТРИХ-КОДА
-// ============================
 async function processScannedBarcode(rawText) {
     const normalized = normalizeInventoryNumber(rawText);
     let device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
@@ -992,7 +768,7 @@ async function handleManualFind() {
 }
 
 // ============================
-// 12. КАРТОЧКА УСТРОЙСТВА
+// 9. КАРТОЧКА УСТРОЙСТВА
 // ============================
 async function loadDeviceHistory(inventoryNumber) {
     try {
@@ -1045,9 +821,6 @@ async function renderDeviceCard(device) {
     currentDevice = device;
 }
 
-// ============================
-// 13. ДЕЙСТВИЯ С УСТРОЙСТВОМ
-// ============================
 async function performDeviceAction(action, data = {}) {
     if (!currentDevice) {
         showToast('Устройство не выбрано', 'warning');
@@ -1200,15 +973,12 @@ function removePendingAction(inventoryNumber) {
 }
 
 // ============================
-// 14. ОБОРОТНАЯ ВЕДОМОСТЬ
+// 10. ОБОРОТНАЯ ВЕДОМОСТЬ
 // ============================
-let isChecklistEditMode = false;
-
 async function loadCabinetSelect() {
     const select = document.getElementById('cabinetSelect');
     if (!select) return;
     select.innerHTML = '<option value="">— Выберите аудиторию —</option>';
-    if (cabinetsData.length === 0) await loadInventory();
     cabinetsData.forEach(cab => {
         if (!cab || !cab.cabinet) return;
         const opt = document.createElement('option');
@@ -1229,6 +999,64 @@ async function loadCabinetSelect() {
     }
 }
 
+async function loadChecklistData(cabinetName, forceRefresh = false) {
+    if (!cabinetName) return;
+    currentCabinetName = cabinetName;
+
+    const cacheKey = `checklist_${cabinetName}`;
+    const cached = localStorage.getItem(cacheKey);
+    if (cached && !forceRefresh) {
+        try {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed)) {
+                currentCabinetNumbers = parsed;
+                renderChecklist(cabinetName);
+                if (navigator.onLine) {
+                    updateChecklistFromServer(cabinetName);
+                }
+                return;
+            }
+        } catch (e) {}
+    }
+
+    if (navigator.onLine) {
+        await updateChecklistFromServer(cabinetName);
+    } else {
+        const cab = cabinetsData.find(c => c.cabinet === cabinetName);
+        currentCabinetNumbers = cab ? (cab.inventoryNumbers || []) : [];
+        renderChecklist(cabinetName);
+        showToast('Офлайн-режим: изменения будут сохранены локально', 'warning');
+    }
+}
+
+async function updateChecklistFromServer(cabinetName) {
+    try {
+        const result = await callProxy('getChecklist', { cabinet: cabinetName });
+        if (result && Array.isArray(result.numbers)) {
+            currentCabinetNumbers = result.numbers;
+            localStorage.setItem(`checklist_${cabinetName}`, JSON.stringify(currentCabinetNumbers));
+            const cab = cabinetsData.find(c => c.cabinet === cabinetName);
+            if (cab) {
+                cab.inventoryNumbers = currentCabinetNumbers;
+            } else {
+                cabinetsData.push({ cabinet: cabinetName, inventoryNumbers: currentCabinetNumbers });
+            }
+            localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
+            renderChecklist(cabinetName);
+            checklistChanged = false;
+        }
+    } catch (error) {
+        console.warn('Не удалось обновить ведомость с сервера:', error);
+        const cached = localStorage.getItem(`checklist_${cabinetName}`);
+        if (cached) {
+            try {
+                currentCabinetNumbers = JSON.parse(cached);
+                renderChecklist(cabinetName);
+            } catch (e) {}
+        }
+    }
+}
+
 function renderChecklist(cabinetName) {
     if (!cabinetName) {
         document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Выберите аудиторию</div>';
@@ -1241,19 +1069,7 @@ function renderChecklist(cabinetName) {
         return;
     }
 
-    const cabinet = cabinetsData.find(c => c && c.cabinet === cabinetName);
-    if (!cabinet) {
-        document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Аудитория не найдена</div>';
-        document.getElementById('progressText').textContent = '0 из 0';
-        document.getElementById('progressBar').style.width = '0%';
-        document.getElementById('progressBar').textContent = '0%';
-        document.getElementById('editChecklistBtn').style.display = 'none';
-        document.getElementById('saveChecklistBtn').style.display = 'none';
-        document.getElementById('checklistEditControls').style.display = 'none';
-        return;
-    }
-
-    const invNumbers = uniqueArray(cabinet.inventoryNumbers || []);
+    const invNumbers = uniqueArray(currentCabinetNumbers);
     let found = 0;
     let itemsHtml = '';
 
@@ -1293,52 +1109,122 @@ function renderChecklist(cabinetName) {
     document.getElementById('progressBar').textContent = percent + '%';
     document.getElementById('progressBar').setAttribute('aria-valuenow', percent);
 
-    document.getElementById('editChecklistBtn').style.display = 'inline-block';
-    document.getElementById('saveChecklistBtn').style.display = 'none';
-
     if (isChecklistEditMode) {
         document.getElementById('editChecklistBtn').style.display = 'none';
+        document.getElementById('saveChecklistBtn').style.display = 'inline-block';
         document.getElementById('checklistEditControls').style.display = 'grid';
-        document.querySelectorAll('.remove-checklist-item').forEach(btn => {
-            btn.addEventListener('click', function(e) {
-                e.stopPropagation();
-                const invNum = this.dataset.inv;
-                const item = this.closest('.list-group-item');
-                const cabinet = document.getElementById('cabinetSelect')?.value;
-                if (item && cabinet) {
-                    item.remove();
-                    const newNumbers = [];
-                    document.querySelectorAll('#checklistItems .list-group-item span').forEach(span => {
-                        const num = span.textContent.trim();
-                        if (num) newNumbers.push(num);
-                    });
-                    const uniqueNew = uniqueArray(newNumbers);
-                    updateCabinetList(cabinet, uniqueNew).then(() => {
-                        const cabIdx = cabinetsData.findIndex(c => c.cabinet === cabinet);
-                        if (cabIdx !== -1) {
-                            cabinetsData[cabIdx].inventoryNumbers = uniqueNew;
-                        }
-                        localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
-                        renderChecklist(cabinet);
-                        showToast(`Номер ${invNum} удалён из списка`, 'info');
-                    }).catch(e => {
-                        showToast('Ошибка удаления: ' + e.message, 'danger');
-                    });
-                }
-            });
-        });
-        document.querySelectorAll('.checklist-item-checkbox').forEach(cb => cb.checked = false);
+        if (checklistChanged) {
+            document.getElementById('saveChecklistBtn').textContent = 'Сохранить *';
+            document.getElementById('saveChecklistBtn').classList.add('btn-warning');
+        } else {
+            document.getElementById('saveChecklistBtn').textContent = 'Сохранить';
+            document.getElementById('saveChecklistBtn').classList.remove('btn-warning');
+        }
     } else {
+        document.getElementById('editChecklistBtn').style.display = 'inline-block';
+        document.getElementById('saveChecklistBtn').style.display = 'none';
         document.getElementById('checklistEditControls').style.display = 'none';
+    }
+
+    document.querySelectorAll('.remove-checklist-item').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const num = this.dataset.inv;
+            currentCabinetNumbers = currentCabinetNumbers.filter(n => n !== num);
+            localStorage.setItem(`checklist_${cabinetName}`, JSON.stringify(currentCabinetNumbers));
+            checklistChanged = true;
+            renderChecklist(cabinetName);
+            showToast(`Номер ${num} удалён (сохраните изменения)`, 'info');
+        });
+    });
+
+    document.querySelectorAll('.checklist-item-checkbox').forEach(cb => cb.checked = false);
+}
+
+function addNumberToChecklist(number) {
+    number = number.trim();
+    if (!number) return;
+    if (!validateInventoryNumber(number)) {
+        showToast('Неверный формат номера', 'danger');
+        return;
+    }
+    const exists = currentCabinetNumbers.some(n => normalizeInventoryNumber(n) === normalizeInventoryNumber(number));
+    if (exists) {
+        showToast('Такой номер уже есть в списке', 'warning');
+        return;
+    }
+    currentCabinetNumbers.push(number);
+    localStorage.setItem(`checklist_${currentCabinetName}`, JSON.stringify(currentCabinetNumbers));
+    checklistChanged = true;
+    renderChecklist(currentCabinetName);
+    showToast('Номер добавлен (сохраните изменения)', 'success');
+}
+
+function removeSelectedNumbers() {
+    const checked = document.querySelectorAll('.checklist-item-checkbox:checked');
+    if (checked.length === 0) {
+        showToast('Выберите элементы для удаления', 'warning');
+        return;
+    }
+    if (!confirm(`Удалить ${checked.length} элемент(ов)?`)) return;
+
+    const toRemove = [];
+    checked.forEach(cb => {
+        const num = cb.dataset.inv;
+        if (num) toRemove.push(num);
+    });
+    currentCabinetNumbers = currentCabinetNumbers.filter(n => !toRemove.includes(n));
+    localStorage.setItem(`checklist_${currentCabinetName}`, JSON.stringify(currentCabinetNumbers));
+    checklistChanged = true;
+    renderChecklist(currentCabinetName);
+    showToast(`Удалено ${toRemove.length} элементов (сохраните изменения)`, 'success');
+}
+
+async function saveChecklistChanges() {
+    if (!currentCabinetName) {
+        showToast('Аудитория не выбрана', 'warning');
+        return;
+    }
+    if (!navigator.onLine) {
+        localStorage.setItem(`checklist_${currentCabinetName}`, JSON.stringify(currentCabinetNumbers));
+        const cab = cabinetsData.find(c => c.cabinet === currentCabinetName);
+        if (cab) {
+            cab.inventoryNumbers = currentCabinetNumbers;
+        } else {
+            cabinetsData.push({ cabinet: currentCabinetName, inventoryNumbers: currentCabinetNumbers });
+        }
+        localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
+        showToast('Изменения сохранены локально (офлайн)', 'success');
+        checklistChanged = false;
+        renderChecklist(currentCabinetName);
+        return;
+    }
+
+    try {
+        const result = await callProxy('updateChecklist', {
+            cabinet: currentCabinetName,
+            inventoryNumbers: currentCabinetNumbers
+        });
+        showToast(result.message || 'Ведомость сохранена', 'success');
+        localStorage.setItem(`checklist_${currentCabinetName}`, JSON.stringify(currentCabinetNumbers));
+        const cab = cabinetsData.find(c => c.cabinet === currentCabinetName);
+        if (cab) {
+            cab.inventoryNumbers = currentCabinetNumbers;
+        } else {
+            cabinetsData.push({ cabinet: currentCabinetName, inventoryNumbers: currentCabinetNumbers });
+        }
+        localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
+        checklistChanged = false;
+        renderChecklist(currentCabinetName);
+    } catch (error) {
+        showToast('Ошибка сохранения: ' + error.message, 'danger');
+        localStorage.setItem(`checklist_${currentCabinetName}`, JSON.stringify(currentCabinetNumbers));
+        checklistChanged = false;
     }
 }
 
-function updateChecklistProgress() {
-    // Оставлена для совместимости
-}
-
 // ============================
-// 15. ТАБЛИЦА (вкладка)
+// 11. ТАБЛИЦА (вкладка)
 // ============================
 async function loadSheetData(sheetName) {
     if (isLoadingTable) return;
@@ -1347,8 +1233,8 @@ async function loadSheetData(sheetName) {
     const status = document.getElementById('dataStatus');
     status.textContent = 'Загрузка...';
     try {
-        const data = await getSheetData(sheetName);
-        if (!data || data.length === 0) {
+        const data = await callProxy('getSheetData', { sheetName, uid: currentUser ? currentUser.uid : null });
+        if (!data || !data.data || data.data.length === 0) {
             tableHeaders = [];
             tableData = [];
             tableFilteredData = [];
@@ -1359,8 +1245,8 @@ async function loadSheetData(sheetName) {
             isLoadingTable = false;
             return;
         }
-        tableHeaders = data[0];
-        tableData = data.slice(1);
+        tableHeaders = data.data[0];
+        tableData = data.data.slice(1);
         populateFilters(tableHeaders, tableData);
         applyFiltersAndSearch();
         status.textContent = `Загружено ${tableData.length} строк`;
@@ -1423,9 +1309,6 @@ function applyFiltersAndSearch() {
     document.getElementById('dataStatus').textContent = `Показано ${tableFilteredData.length} из ${tableData.length} строк`;
 }
 
-// ============================================================
-// ИСПРАВЛЕННАЯ ФУНКЦИЯ renderTable – форматирование дат, последняя запись истории, запрет редактирования истории
-// ============================================================
 function renderTable(data) {
     const tableBody = document.getElementById('dataTableBody');
     const thead = document.getElementById('dataTableHead');
@@ -1437,12 +1320,7 @@ function renderTable(data) {
         return;
     }
 
-    // Индекс колонки "История перемещений"
-    const historyIndex = tableHeaders.findIndex(h =>
-        h.trim().toLowerCase() === 'история перемещений' ||
-        h.trim().toLowerCase() === 'history'
-    );
-    // Индексы колонок с датами (по ключевым словам)
+    const historyIndex = tableHeaders.findIndex(h => h.trim().toLowerCase() === 'история перемещений' || h.trim().toLowerCase() === 'history');
     const dateColumns = [];
     tableHeaders.forEach((h, idx) => {
         const lower = h.trim().toLowerCase();
@@ -1455,7 +1333,6 @@ function renderTable(data) {
     data.forEach((row, index) => {
         const sheetRow = index + 2;
         const rowCopy = row.slice();
-        // Форматируем даты
         dateColumns.forEach(colIdx => {
             if (rowCopy[colIdx]) {
                 const formatted = formatDate(rowCopy[colIdx]);
@@ -1464,7 +1341,6 @@ function renderTable(data) {
                 }
             }
         });
-        // Заменяем историю на последнее событие
         if (historyIndex !== -1 && rowCopy[historyIndex]) {
             const historyStr = rowCopy[historyIndex];
             const events = historyStr.split('; ').filter(s => s.trim());
@@ -1477,12 +1353,11 @@ function renderTable(data) {
     });
     tableBody.innerHTML = html;
 
-    // Назначаем редактирование (кроме колонки истории)
     document.querySelectorAll('#dataTableBody td:not(:first-child)').forEach(td => {
         const tr = td.parentElement;
         const colIndex = Array.from(tr.children).indexOf(td) - 1;
         if (colIndex === historyIndex) {
-            td.style.backgroundColor = '#f8f9fa'; // лёгкий фон, чтобы было видно, что не редактируется
+            td.style.backgroundColor = '#f8f9fa';
             return;
         }
         td.setAttribute('contenteditable', 'true');
@@ -1493,7 +1368,7 @@ function renderTable(data) {
             const sheetRow = parseInt(tr2.querySelector('.row-selector').dataset.sheetRow);
             const sheet = document.getElementById('sheetSelect').value;
             if (sheetRow && colIdx >= 0) {
-                updateSheetCell(sheet, sheetRow, colIdx, newValue).catch(() => {});
+                callProxy('updateCell', { sheetName: sheet, row: sheetRow, col: colIdx, value: newValue, uid: currentUser ? currentUser.uid : null }).catch(() => {});
             }
         });
         td.addEventListener('focus', function() {
@@ -1503,7 +1378,7 @@ function renderTable(data) {
 }
 
 // ============================
-// 16. ОФЛАЙН-РЕЖИМ
+// 12. ОФЛАЙН-РЕЖИМ
 // ============================
 function savePendingScan(inventoryNumber, type = 'barcode') {
     let pending = JSON.parse(localStorage.getItem('pendingScans') || '[]');
@@ -1618,7 +1493,7 @@ async function syncPendingData() {
 }
 
 // ============================
-// 17. ЛОГИ
+// 13. ЛОГИ
 // ============================
 function renderLogs() {
     const container = document.getElementById('logsList');
@@ -1691,7 +1566,7 @@ window.createFromLog = function(inventoryNumber) {
 };
 
 // ============================
-// 18. МОДАЛКА СОЗДАНИЯ
+// 14. МОДАЛКА СОЗДАНИЯ
 // ============================
 function showCreateDeviceModal(inventoryNumber) {
     document.getElementById('createInventoryNumber').value = inventoryNumber;
@@ -1795,7 +1670,7 @@ async function confirmCreateDevice() {
 }
 
 // ============================
-// 19. ОТЧЁТ
+// 15. ОТЧЁТ
 // ============================
 function generateCSV(data) {
     if (!data || !Array.isArray(data) || data.length === 0) return '';
@@ -1836,9 +1711,6 @@ function downloadCSV(csv) {
     URL.revokeObjectURL(url);
 }
 
-// ============================================================
-// ИСПРАВЛЕННАЯ ФУНКЦИЯ printReport – адаптивная печать на всю страницу
-// ============================================================
 function printReport() {
     if (!inventoryData || inventoryData.length === 0) {
         showToast('Нет данных для печати', 'warning');
@@ -1860,7 +1732,6 @@ function printReport() {
         return;
     }
 
-    // Стили для печати – адаптивные, таблица на всю ширину
     const style = document.createElement('style');
     style.id = 'print-report-style';
     style.textContent = `
@@ -1912,7 +1783,6 @@ function printReport() {
             background-color: #f0f0f0 !important;
             font-weight: bold;
         }
-        /* Адаптация для мобильных устройств */
         @media (max-width: 600px) {
             #report-print-content table {
                 font-size: 7pt;
@@ -1986,14 +1856,13 @@ function printReport() {
 
     window.print();
 
-    // Очистка
     document.body.removeChild(printDiv);
     const styleToRemove = document.getElementById('print-report-style');
     if (styleToRemove) styleToRemove.remove();
 }
 
 // ============================
-// 20. НАВИГАЦИЯ
+// 16. НАВИГАЦИЯ
 // ============================
 let navButtons = [];
 let activePill = null;
@@ -2012,7 +1881,7 @@ function updateActivePill(smooth = true) {
 }
 
 // ============================
-// 21. ИНИЦИАЛИЗАЦИЯ
+// 17. ИНИЦИАЛИЗАЦИЯ
 // ============================
 document.addEventListener('DOMContentLoaded', async function() {
     const forceHideLoading = setTimeout(() => {
@@ -2050,6 +1919,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                             localStorage.setItem('localUserName', user.displayName);
                         }
                         document.getElementById('userDisplay').textContent = currentUser.displayName || currentUser.uid || 'Аноним';
+                        await loadUserRole();
                     } else {
                         try {
                             const cred = await auth.signInAnonymously();
@@ -2061,6 +1931,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                                 } catch (e) { /* ignore */ }
                             }
                             document.getElementById('userDisplay').textContent = currentUser.displayName || currentUser.uid || 'Аноним';
+                            await loadUserRole();
                         } catch (e) {
                             console.error('Ошибка анонимного входа:', e);
                             document.getElementById('userDisplay').textContent = localUserName;
@@ -2137,6 +2008,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
         document.getElementById('backFromReport')?.addEventListener('click', () => showScreen('dashboard'));
         document.getElementById('backFromLogs')?.addEventListener('click', () => showScreen('dashboard'));
+        document.getElementById('backFromUsers')?.addEventListener('click', () => showScreen('dashboard'));
 
         document.getElementById('manualFindBtn')?.addEventListener('click', handleManualFind);
         document.getElementById('manualInvInput')?.addEventListener('keydown', function(e) {
@@ -2173,6 +2045,8 @@ document.addEventListener('DOMContentLoaded', async function() {
                 showToast('Имя обновлено', 'success');
             }
         });
+
+        document.getElementById('becomeAdminBtn')?.addEventListener('click', promoteToAdmin);
 
         // Карточка
         document.getElementById('editBtn')?.addEventListener('click', function() {
@@ -2265,10 +2139,17 @@ document.addEventListener('DOMContentLoaded', async function() {
             document.getElementById('scrapComment').value = '';
         });
 
+        // Ведомость
         document.getElementById('cabinetSelect')?.addEventListener('change', function() {
             const cabinet = this.value;
             if (cabinet) {
-                renderChecklist(cabinet);
+                if (isChecklistEditMode) {
+                    isChecklistEditMode = false;
+                    document.getElementById('editChecklistBtn').style.display = 'inline-block';
+                    document.getElementById('saveChecklistBtn').style.display = 'none';
+                    document.getElementById('checklistEditControls').style.display = 'none';
+                }
+                loadChecklistData(cabinet);
             } else {
                 document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Выберите аудиторию</div>';
                 document.getElementById('progressText').textContent = '0 из 0';
@@ -2276,14 +2157,45 @@ document.addEventListener('DOMContentLoaded', async function() {
                 document.getElementById('progressBar').textContent = '0%';
             }
         });
+
+        document.getElementById('editChecklistBtn')?.addEventListener('click', function() {
+            if (!currentCabinetName) {
+                showToast('Выберите аудиторию', 'warning');
+                return;
+            }
+            isChecklistEditMode = true;
+            renderChecklist(currentCabinetName);
+        });
+
+        document.getElementById('saveChecklistBtn')?.addEventListener('click', function() {
+            saveChecklistChanges();
+        });
+
+        document.getElementById('addChecklistItemBtn')?.addEventListener('click', function() {
+            const input = document.getElementById('newChecklistItemInput');
+            if (!input || !input.value.trim()) {
+                showToast('Введите инвентарный номер', 'warning');
+                return;
+            }
+            const num = input.value.trim();
+            addNumberToChecklist(num);
+            input.value = '';
+        });
+
+        document.getElementById('removeSelectedChecklistBtn')?.addEventListener('click', function() {
+            removeSelectedNumbers();
+        });
+
         document.getElementById('refreshChecklistBtn')?.addEventListener('click', function() {
             const cabinet = document.getElementById('cabinetSelect')?.value;
             if (cabinet) {
-                renderChecklist(cabinet);
+                localStorage.removeItem(`checklist_${cabinet}`);
+                loadChecklistData(cabinet, true);
                 showToast('Обновлено', 'success');
             }
         });
 
+        // Отчёт
         document.getElementById('downloadCsvBtn')?.addEventListener('click', function() {
             const cabinetFilter = document.getElementById('reportCabinetFilter')?.value;
             let filteredData = inventoryData;
@@ -2303,11 +2215,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
         document.getElementById('printPdfBtn')?.addEventListener('click', printReport);
 
-        document.getElementById('helpBtn')?.addEventListener('click', function() {
-            const modal = new bootstrap.Modal(document.getElementById('helpModal'));
-            modal.show();
-        });
-
+        // Логи
         document.getElementById('syncNowBtn')?.addEventListener('click', async function() {
             await syncPendingData();
             renderLogs();
@@ -2321,8 +2229,187 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         });
 
+        // Таблица
+        document.getElementById('backFromData')?.addEventListener('click', function() {
+            showScreen('dashboard');
+        });
+        document.getElementById('sheetSelect')?.addEventListener('change', function() {
+            currentSheet = this.value;
+            loadSheetData(this.value);
+        });
+        document.getElementById('refreshDataBtn2')?.addEventListener('click', function() {
+            const sheet = document.getElementById('sheetSelect').value;
+            loadSheetData(sheet);
+        });
+        document.getElementById('tableSearchInput')?.addEventListener('input', function() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                applyFiltersAndSearch();
+            }, 300);
+        });
+        document.getElementById('addRowBtn')?.addEventListener('click', async function() {
+            if (!tableHeaders.length) {
+                showToast('Сначала загрузите данные', 'warning');
+                return;
+            }
+            const newRow = new Array(tableHeaders.length).fill('');
+            const sheet = document.getElementById('sheetSelect').value;
+            try {
+                const result = await callProxy('addRow', { sheetName: sheet, rowData: newRow, uid: currentUser ? currentUser.uid : null });
+                showToast(result.message || 'Строка добавлена', 'success');
+                loadSheetData(sheet);
+            } catch (e) {
+                showToast('Ошибка добавления: ' + e.message, 'danger');
+            }
+        });
+        document.getElementById('deleteRowsBtn')?.addEventListener('click', async function() {
+            const checked = document.querySelectorAll('.row-selector:checked');
+            if (checked.length === 0) {
+                showToast('Выберите строки для удаления', 'warning');
+                return;
+            }
+            if (!confirm(`Удалить ${checked.length} строк(и)?`)) return;
+            const rowIndices = Array.from(checked).map(cb => parseInt(cb.dataset.sheetRow)).filter(idx => !isNaN(idx) && idx > 0);
+            if (rowIndices.length === 0) {
+                showToast('Не удалось определить номера строк', 'danger');
+                return;
+            }
+            const sheet = document.getElementById('sheetSelect').value;
+            try {
+                const result = await callProxy('deleteRows', { sheetName: sheet, rowIndices: rowIndices, uid: currentUser ? currentUser.uid : null });
+                showToast(result.message || 'Строки удалены', 'success');
+                loadSheetData(sheet);
+            } catch (e) {
+                showToast('Ошибка удаления: ' + e.message, 'danger');
+            }
+        });
+
+        // Модалки создания и редактирования
+        const createModal = document.getElementById('createDeviceModal');
+        if (createModal) {
+            createModal.addEventListener('show.bs.modal', function() {
+                const select = document.getElementById('createCabinet');
+                if (select) {
+                    select.innerHTML = '<option value="">— Не выбрана —</option>';
+                    cabinetsData.forEach(cab => {
+                        if (cab && cab.cabinet) {
+                            const opt = document.createElement('option');
+                            opt.value = cab.cabinet;
+                            opt.textContent = cab.cabinet;
+                            select.appendChild(opt);
+                        }
+                    });
+                }
+            });
+        }
+
+        const editModal = document.getElementById('editModal');
+        if (editModal) {
+            editModal.addEventListener('show.bs.modal', function() {
+                const select = document.getElementById('editCabinet');
+                if (select) {
+                    select.innerHTML = '<option value="">— Не выбрана —</option>';
+                    cabinetsData.forEach(cab => {
+                        if (cab && cab.cabinet) {
+                            const opt = document.createElement('option');
+                            opt.value = cab.cabinet;
+                            opt.textContent = cab.cabinet;
+                            if (currentDevice && currentDevice.cabinet === cab.cabinet) {
+                                opt.selected = true;
+                            }
+                            select.appendChild(opt);
+                        }
+                    });
+                }
+            });
+        }
+
         document.getElementById('confirmCreateDevice')?.addEventListener('click', confirmCreateDevice);
 
+        document.getElementById('helpBtn')?.addEventListener('click', function() {
+            const modal = new bootstrap.Modal(document.getElementById('helpModal'));
+            modal.show();
+        });
+
+        document.getElementById('refreshUsersBtn')?.addEventListener('click', function() {
+            loadUsers();
+        });
+
+        // Подтверждение сканирования
+        document.getElementById('confirmScanOkBtn')?.addEventListener('click', function() {
+            const input = document.getElementById('confirmScanInput');
+            let value = input.value.trim();
+            if (!value) {
+                showToast('Номер не может быть пустым', 'warning');
+                return;
+            }
+            const modal = bootstrap.Modal.getInstance(document.getElementById('confirmScanModal'));
+            if (modal) modal.hide();
+            processScannedBarcode(value);
+        });
+        document.getElementById('confirmScanEditBtn')?.addEventListener('click', function() {
+            document.getElementById('confirmScanInput').focus();
+            document.getElementById('confirmScanInput').select();
+        });
+        document.getElementById('confirmScanInput')?.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                document.getElementById('confirmScanOkBtn').click();
+            }
+        });
+
+        // Фонарик
+        document.getElementById('torchBtn')?.addEventListener('click', function() {
+            if (!scannerInstance) {
+                showToast('Сканер не запущен', 'warning');
+                return;
+            }
+            if (!torchTrack) {
+                showToast('Фонарик не поддерживается на этом устройстве', 'warning');
+                return;
+            }
+            try {
+                const newState = !torchOn;
+                torchTrack.applyConstraints({
+                    advanced: [{ torch: newState }]
+                }).then(() => {
+                    torchOn = newState;
+                    this.innerHTML = torchOn ? 
+                        '<i class="bi bi-lightbulb-fill"></i> Выкл' : 
+                        '<i class="bi bi-lightbulb"></i> Фонарик';
+                    this.classList.toggle('btn-warning', !torchOn);
+                    this.classList.toggle('btn-success', torchOn);
+                    console.log('Фонарик:', torchOn ? 'ВКЛ' : 'ВЫКЛ');
+                }).catch(err => {
+                    console.error('Ошибка переключения фонарика:', err);
+                    showToast('Ошибка: ' + err.message, 'danger');
+                });
+            } catch (e) {
+                console.error('Ошибка переключения фонарика:', e);
+                showToast('Ошибка: ' + e.message, 'danger');
+            }
+        });
+
+        // Изменение ориентации
+        window.addEventListener('resize', function() {
+            if (document.getElementById('scanner').classList.contains('active')) {
+                stopScanner();
+                setTimeout(() => {
+                    initScanner();
+                }, 300);
+            }
+        });
+        window.addEventListener('orientationchange', function() {
+            if (document.getElementById('scanner').classList.contains('active')) {
+                setTimeout(() => {
+                    stopScanner();
+                    setTimeout(() => {
+                        initScanner();
+                    }, 300);
+                }, 400);
+            }
+        });
+
+        // Онлайн/офлайн
         window.addEventListener('online', function() {
             syncPendingData();
             loadInventory().then(() => {
@@ -2350,7 +2437,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                     }
                 });
             }
-        }, 120000);
+        }, 300000);
 
         showScreen('dashboard');
 
