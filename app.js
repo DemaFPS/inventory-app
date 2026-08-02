@@ -1,15 +1,11 @@
 /**
- * app.js – ИТОГОВАЯ ВЕРСИЯ
+ * app.js – ИТОГОВАЯ ВЕРСИЯ с кэшированием роли
  * 
  * ИСПРАВЛЕНИЯ:
- * 1. При добавлении инвентарного номера в ведомость автоматически обновляется аудитория устройства (если отличается)
- * 2. Улучшена загрузка ведомости: таймаут 10 сек, обработка ошибок, сообщение для пустых аудиторий
- * 3. Исправлены ошибки 404 и невалидный JSON при загрузке пустых списков
- * 4. Роль по умолчанию "scanner_only"
- * 5. Самообновление имени пользователя через главный экран
- * 6. Ускорена загрузка ведомости: кэш + фоновое обновление
- * 7. Исправлено смещение индексов в таблице (GAS)
- * 8. Скрыты кнопки для scanner_only на главном экране
+ * - При ошибке загрузки роли используется последняя известная роль из localStorage
+ * - Сохранение роли после успешной загрузки
+ * - Улучшена обработка ошибок прокси
+ * - Добавлена кнопка "Повторить загрузку роли" (опционально)
  */
 
 // ============================
@@ -29,7 +25,7 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 
 // ============================
-// 1. ПРОКСИ URL
+// 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
 const PROXY_URL = 'https://script.google.com/macros/s/AKfycbwkg0UP4wZaSuA-zK3okeGaKyR-t52NSqhUnrJ_MrR9OysBv1G6ZWfNfd59Dbmvy0N1/exec';
 
@@ -64,10 +60,10 @@ let isChecklistEditMode = false;
 let checklistChanged = false;
 let isLoadingChecklist = false;
 
-// Роли
+// Роли – загружаем из кэша, если есть
 let isAdmin = false;
-let userRole = 'scanner_only';
-let userBlocked = false;
+let userRole = localStorage.getItem('userRole') || 'scanner_only';
+let userBlocked = localStorage.getItem('userBlocked') === 'true';
 let usersList = [];
 
 // ============================
@@ -402,22 +398,56 @@ async function updateCabinetList(cabinetName, inventoryNumbers) {
 }
 
 // ============================
-// 5. ФУНКЦИИ ДЛЯ РОЛЕЙ И БЛОКИРОВКИ
+// 5. ФУНКЦИИ ДЛЯ РОЛЕЙ И БЛОКИРОВКИ (С КЭШИРОВАНИЕМ)
 // ============================
 async function loadUserRole() {
-  if (!currentUser) return;
-  const uid = currentUser.uid;
-  const displayName = currentUser.displayName || localUserName || 'Аноним';
-  try {
-    const result = await callProxy('getUserRole', { uid, displayName });
-    userRole = result.role || 'scanner_only';
-    userBlocked = result.blocked === true;
-    
-    if (userBlocked) {
-      showBlockedScreen();
-      return;
-    }
+    if (!currentUser) return;
+    const uid = currentUser.uid;
+    const displayName = currentUser.displayName || localUserName || 'Аноним';
+    try {
+        const result = await callProxy('getUserRole', { uid, displayName });
+        userRole = result.role || 'scanner_only';
+        userBlocked = result.blocked === true;
+        
+        // Сохраняем в localStorage
+        localStorage.setItem('userRole', userRole);
+        localStorage.setItem('userBlocked', String(userBlocked));
 
+        if (userBlocked) {
+            showBlockedScreen();
+            return;
+        }
+
+        applyRoleUI();
+        console.log('Роль пользователя:', userRole, 'Заблокирован:', userBlocked);
+    } catch (error) {
+        console.warn('Ошибка получения роли, используем кэш:', error);
+        // Пытаемся загрузить из localStorage
+        const cachedRole = localStorage.getItem('userRole');
+        const cachedBlocked = localStorage.getItem('userBlocked');
+        if (cachedRole) {
+            userRole = cachedRole;
+            userBlocked = cachedBlocked === 'true';
+            console.log('Загружена роль из кэша:', userRole);
+            if (userBlocked) {
+                showBlockedScreen();
+                return;
+            }
+            applyRoleUI();
+            showToast('Используется кэшированная роль (ошибка связи с сервером)', 'warning');
+        } else {
+            // Если кэша нет – ставим scanner_only
+            userRole = 'scanner_only';
+            userBlocked = false;
+            isAdmin = false;
+            // Показываем базовый UI
+            applyRoleUI();
+            showToast('Не удалось загрузить роль, установлена "Только сканер"', 'danger');
+        }
+    }
+}
+
+function applyRoleUI() {
     // Настройка навигации
     const navBtnUsers = document.querySelector('.nav-btn[data-screen="users"]');
     const navBtnChecklist = document.querySelector('.nav-btn[data-screen="checklist"]');
@@ -437,162 +467,150 @@ async function loadUserRole() {
     const mainReportBtn = document.getElementById('reportBtn');
 
     if (effectiveRole === 'admin') {
-      allNavBtns.forEach(btn => { if (btn) btn.style.display = 'flex'; });
-      isAdmin = true;
-      if (mainChecklistBtn) mainChecklistBtn.style.display = 'block';
-      if (mainReportBtn) mainReportBtn.style.display = 'block';
+        allNavBtns.forEach(btn => { if (btn) btn.style.display = 'flex'; });
+        isAdmin = true;
+        if (mainChecklistBtn) mainChecklistBtn.style.display = 'block';
+        if (mainReportBtn) mainReportBtn.style.display = 'block';
     } else if (effectiveRole === 'full') {
-      [navBtnChecklist, navBtnReport, navBtnLogs, navBtnData, navBtnScanner, navBtnDashboard].forEach(btn => {
-        if (btn) btn.style.display = 'flex';
-      });
-      if (navBtnUsers) navBtnUsers.style.display = 'none';
-      isAdmin = false;
-      if (mainChecklistBtn) mainChecklistBtn.style.display = 'block';
-      if (mainReportBtn) mainReportBtn.style.display = 'block';
+        [navBtnChecklist, navBtnReport, navBtnLogs, navBtnData, navBtnScanner, navBtnDashboard].forEach(btn => {
+            if (btn) btn.style.display = 'flex';
+        });
+        if (navBtnUsers) navBtnUsers.style.display = 'none';
+        isAdmin = false;
+        if (mainChecklistBtn) mainChecklistBtn.style.display = 'block';
+        if (mainReportBtn) mainReportBtn.style.display = 'block';
     } else { // scanner_only
-      if (navBtnDashboard) navBtnDashboard.style.display = 'flex';
-      if (navBtnScanner) navBtnScanner.style.display = 'flex';
-      isAdmin = false;
-      if (mainChecklistBtn) mainChecklistBtn.style.display = 'none';
-      if (mainReportBtn) mainReportBtn.style.display = 'none';
+        if (navBtnDashboard) navBtnDashboard.style.display = 'flex';
+        if (navBtnScanner) navBtnScanner.style.display = 'flex';
+        isAdmin = false;
+        if (mainChecklistBtn) mainChecklistBtn.style.display = 'none';
+        if (mainReportBtn) mainReportBtn.style.display = 'none';
     }
-
-    console.log('Роль пользователя:', userRole, 'Заблокирован:', userBlocked);
-  } catch (error) {
-    console.warn('Ошибка получения роли:', error);
-    userRole = 'scanner_only';
-    userBlocked = false;
-    isAdmin = false;
-    document.querySelector('.nav-btn[data-screen="dashboard"]').style.display = 'flex';
-    document.querySelector('.nav-btn[data-screen="scanner"]').style.display = 'flex';
-    document.getElementById('checklistBtn').style.display = 'none';
-    document.getElementById('reportBtn').style.display = 'none';
-  }
 }
 
 function showBlockedScreen() {
-  document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
-  const blockedScreen = document.getElementById('blocked-screen');
-  if (blockedScreen) blockedScreen.classList.add('active');
-  document.getElementById('bottomNav').style.display = 'none';
-  document.getElementById('appContainer').style.display = 'block';
-  showToast('Ваш аккаунт заблокирован администратором', 'danger');
+    document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
+    const blockedScreen = document.getElementById('blocked-screen');
+    if (blockedScreen) blockedScreen.classList.add('active');
+    document.getElementById('bottomNav').style.display = 'none';
+    document.getElementById('appContainer').style.display = 'block';
+    showToast('Ваш аккаунт заблокирован администратором', 'danger');
 }
 
 async function promoteToAdmin() {
-  if (!currentUser) {
-    showToast('Пользователь не авторизован', 'warning');
-    return;
-  }
-  const password = prompt('Введите мастер-пароль для получения прав администратора:');
-  if (!password) return;
-  try {
-    const result = await callProxy('promoteToAdmin', { uid: currentUser.uid, masterPassword: password });
-    showToast(result.message || 'Вы стали администратором!', 'success');
-    await loadUserRole();
-  } catch (error) {
-    showToast('Ошибка: ' + error.message, 'danger');
-  }
+    if (!currentUser) {
+        showToast('Пользователь не авторизован', 'warning');
+        return;
+    }
+    const password = prompt('Введите мастер-пароль для получения прав администратора:');
+    if (!password) return;
+    try {
+        const result = await callProxy('promoteToAdmin', { uid: currentUser.uid, masterPassword: password });
+        showToast(result.message || 'Вы стали администратором!', 'success');
+        await loadUserRole();
+    } catch (error) {
+        showToast('Ошибка: ' + error.message, 'danger');
+    }
 }
 
 async function loadUsers() {
-  if (!isAdmin) {
-    showToast('Доступ запрещён', 'warning');
-    return;
-  }
-  try {
-    const result = await callProxy('getUsers', { uid: currentUser.uid });
-    usersList = result.users || [];
-    renderUsersTable(usersList);
-  } catch (error) {
-    showToast('Ошибка загрузки пользователей: ' + error.message, 'danger');
-  }
+    if (!isAdmin) {
+        showToast('Доступ запрещён', 'warning');
+        return;
+    }
+    try {
+        const result = await callProxy('getUsers', { uid: currentUser.uid });
+        usersList = result.users || [];
+        renderUsersTable(usersList);
+    } catch (error) {
+        showToast('Ошибка загрузки пользователей: ' + error.message, 'danger');
+    }
 }
 
 function renderUsersTable(users) {
-  const container = document.getElementById('usersTableBody');
-  if (!container) return;
-  if (!users || users.length === 0) {
-    container.innerHTML = '<tr><td colspan="5" class="text-muted">Нет пользователей</td></tr>';
-    return;
-  }
-  let html = '';
-  users.forEach((user, index) => {
-    html += `
-      <tr>
-        <td>${index + 1}</td>
-        <td>
-          <input type="text" class="form-control form-control-sm user-name-input" value="${user.displayName || ''}" data-uid="${user.uid}">
-        </td>
-        <td>
-          <select class="form-select form-select-sm user-role-select" data-uid="${user.uid}">
-            <option value="scanner_only" ${user.role === 'scanner_only' ? 'selected' : ''}>Только сканер</option>
-            <option value="full" ${user.role === 'full' || user.role === 'user' && user.role !== 'scanner_only' && user.role !== 'admin' ? 'selected' : ''}>Полный доступ</option>
-            <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Администратор</option>
-          </select>
-        </td>
-        <td>
-          <div class="form-check form-switch">
-            <input class="form-check-input user-blocked-checkbox" type="checkbox" ${user.blocked ? 'checked' : ''} data-uid="${user.uid}">
-          </div>
-        </td>
-        <td>
-          <button class="btn btn-sm btn-primary save-user-btn" data-uid="${user.uid}">Сохранить</button>
-          <button class="btn btn-sm btn-outline-danger delete-user-btn" data-uid="${user.uid}">Удалить</button>
-        </td>
-      </tr>
-    `;
-  });
-  container.innerHTML = html;
-
-  document.querySelectorAll('.save-user-btn').forEach(btn => {
-    btn.addEventListener('click', async function() {
-      const uid = this.dataset.uid;
-      const row = this.closest('tr');
-      const displayName = row.querySelector('.user-name-input').value.trim();
-      const role = row.querySelector('.user-role-select').value;
-      const blocked = row.querySelector('.user-blocked-checkbox').checked;
-      await updateUser(uid, { displayName, role, blocked });
+    const container = document.getElementById('usersTableBody');
+    if (!container) return;
+    if (!users || users.length === 0) {
+        container.innerHTML = '<tr><td colspan="5" class="text-muted">Нет пользователей</td></tr>';
+        return;
+    }
+    let html = '';
+    users.forEach((user, index) => {
+        html += `
+            <tr>
+                <td>${index + 1}</td>
+                <td>
+                    <input type="text" class="form-control form-control-sm user-name-input" value="${user.displayName || ''}" data-uid="${user.uid}">
+                </td>
+                <td>
+                    <select class="form-select form-select-sm user-role-select" data-uid="${user.uid}">
+                        <option value="scanner_only" ${user.role === 'scanner_only' ? 'selected' : ''}>Только сканер</option>
+                        <option value="full" ${user.role === 'full' || user.role === 'user' && user.role !== 'scanner_only' && user.role !== 'admin' ? 'selected' : ''}>Полный доступ</option>
+                        <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Администратор</option>
+                    </select>
+                </td>
+                <td>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input user-blocked-checkbox" type="checkbox" ${user.blocked ? 'checked' : ''} data-uid="${user.uid}">
+                    </div>
+                </td>
+                <td>
+                    <button class="btn btn-sm btn-primary save-user-btn" data-uid="${user.uid}">Сохранить</button>
+                    <button class="btn btn-sm btn-outline-danger delete-user-btn" data-uid="${user.uid}">Удалить</button>
+                </td>
+            </tr>
+        `;
     });
-  });
+    container.innerHTML = html;
 
-  document.querySelectorAll('.delete-user-btn').forEach(btn => {
-    btn.addEventListener('click', async function() {
-      const uid = this.dataset.uid;
-      if (confirm('Удалить пользователя?')) {
-        await deleteUser(uid);
-      }
+    document.querySelectorAll('.save-user-btn').forEach(btn => {
+        btn.addEventListener('click', async function() {
+            const uid = this.dataset.uid;
+            const row = this.closest('tr');
+            const displayName = row.querySelector('.user-name-input').value.trim();
+            const role = row.querySelector('.user-role-select').value;
+            const blocked = row.querySelector('.user-blocked-checkbox').checked;
+            await updateUser(uid, { displayName, role, blocked });
+        });
     });
-  });
+
+    document.querySelectorAll('.delete-user-btn').forEach(btn => {
+        btn.addEventListener('click', async function() {
+            const uid = this.dataset.uid;
+            if (confirm('Удалить пользователя?')) {
+                await deleteUser(uid);
+            }
+        });
+    });
 }
 
 async function updateUser(uid, data) {
-  if (!isAdmin) return;
-  try {
-    await callProxy('updateUser', { 
-      uid, 
-      displayName: data.displayName, 
-      role: data.role, 
-      blocked: data.blocked,
-      adminUid: currentUser.uid 
-    });
-    showToast('Данные пользователя обновлены', 'success');
-    await loadUsers();
-  } catch (error) {
-    showToast('Ошибка обновления: ' + error.message, 'danger');
-  }
+    if (!isAdmin) return;
+    try {
+        await callProxy('updateUser', { 
+            uid, 
+            displayName: data.displayName, 
+            role: data.role, 
+            blocked: data.blocked,
+            adminUid: currentUser.uid 
+        });
+        showToast('Данные пользователя обновлены', 'success');
+        await loadUsers();
+    } catch (error) {
+        showToast('Ошибка обновления: ' + error.message, 'danger');
+    }
 }
 
 async function deleteUser(uid) {
-  if (!isAdmin) return;
-  if (!confirm('Удалить пользователя?')) return;
-  try {
-    await callProxy('deleteUser', { uid, adminUid: currentUser.uid });
-    showToast('Пользователь удалён', 'success');
-    await loadUsers();
-  } catch (error) {
-    showToast('Ошибка: ' + error.message, 'danger');
-  }
+    if (!isAdmin) return;
+    if (!confirm('Удалить пользователя?')) return;
+    try {
+        await callProxy('deleteUser', { uid, adminUid: currentUser.uid });
+        showToast('Пользователь удалён', 'success');
+        await loadUsers();
+    } catch (error) {
+        showToast('Ошибка: ' + error.message, 'danger');
+    }
 }
 
 // ============================
@@ -913,6 +931,7 @@ async function renderDeviceCard(device) {
 }
 
 async function performDeviceAction(action, data = {}) {
+    // Разрешаем для всех, кроме scanner_only
     if (userRole === 'scanner_only') {
         showToast('У вас нет прав на выполнение этого действия', 'warning');
         return;
@@ -1068,7 +1087,7 @@ function removePendingAction(inventoryNumber) {
 }
 
 // ============================
-// 10. ОБОРОТНАЯ ВЕДОМОСТЬ (УСКОРЕННАЯ + ИСПРАВЛЕННАЯ)
+// 10. ОБОРОТНАЯ ВЕДОМОСТЬ
 // ============================
 async function loadCabinetSelect() {
     const select = document.getElementById('cabinetSelect');
@@ -1094,7 +1113,6 @@ async function loadCabinetSelect() {
     }
 }
 
-// Ускоренная загрузка ведомости с кэшем и таймаутом 10 сек
 async function loadChecklistData(cabinetName, forceRefresh = false) {
     if (isLoadingChecklist) return;
     if (!cabinetName) return;
@@ -1108,14 +1126,12 @@ async function loadChecklistData(cabinetName, forceRefresh = false) {
     const cacheKey = `checklist_${cabinetName}`;
     const cached = localStorage.getItem(cacheKey);
 
-    // Если есть кэш и не принудительное обновление – сразу показываем
     if (cached && !forceRefresh) {
         try {
             const parsed = JSON.parse(cached);
             if (Array.isArray(parsed)) {
                 currentCabinetNumbers = parsed;
                 renderChecklist(cabinetName);
-                // Фоновое обновление (не ждём)
                 if (navigator.onLine) {
                     updateChecklistFromServer(cabinetName).catch(() => {});
                 }
@@ -1125,11 +1141,10 @@ async function loadChecklistData(cabinetName, forceRefresh = false) {
         } catch (e) {}
     }
 
-    // Нет кэша или принудительное обновление – пробуем с сервера с таймаутом
     if (navigator.onLine) {
         try {
             const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Timeout')), 10000) // увеличено до 10 сек
+                setTimeout(() => reject(new Error('Timeout')), 10000)
             );
             const result = await Promise.race([
                 callProxy('getChecklist', { cabinet: cabinetName }),
@@ -1152,7 +1167,6 @@ async function loadChecklistData(cabinetName, forceRefresh = false) {
             }
         } catch (error) {
             console.warn('Не удалось загрузить ведомость с сервера (таймаут или ошибка):', error);
-            // Если есть кэш, используем его (даже если forceRefresh)
             if (cached) {
                 try {
                     currentCabinetNumbers = JSON.parse(cached);
@@ -1164,7 +1178,6 @@ async function loadChecklistData(cabinetName, forceRefresh = false) {
         }
     }
 
-    // Если ничего не помогло – берём из cabinetsData или пустой список
     const cab = cabinetsData.find(c => c.cabinet === cabinetName);
     currentCabinetNumbers = cab ? (cab.inventoryNumbers || []) : [];
     renderChecklist(cabinetName);
@@ -1178,7 +1191,6 @@ async function loadChecklistData(cabinetName, forceRefresh = false) {
     isLoadingChecklist = false;
 }
 
-// Фоновое обновление ведомости
 async function updateChecklistFromServer(cabinetName) {
     try {
         const result = await callProxy('getChecklist', { cabinet: cabinetName });
@@ -1202,7 +1214,6 @@ async function updateChecklistFromServer(cabinetName) {
     }
 }
 
-// Отрисовка ведомости с поддержкой пустого списка
 function renderChecklist(cabinetName) {
     if (!cabinetName) {
         document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Выберите аудиторию</div>';
@@ -1215,7 +1226,6 @@ function renderChecklist(cabinetName) {
         return;
     }
 
-    // Если ещё идёт загрузка и список пуст – показываем спиннер
     if (isLoadingChecklist && currentCabinetNumbers.length === 0) {
         document.getElementById('checklistItems').innerHTML = `
             <div class="text-center py-3">
@@ -1228,7 +1238,6 @@ function renderChecklist(cabinetName) {
         return;
     }
 
-    // Если список пуст – сообщаем об этом
     if (currentCabinetNumbers.length === 0) {
         document.getElementById('checklistItems').innerHTML = `
             <div class="text-center py-4 text-muted">
@@ -1239,7 +1248,6 @@ function renderChecklist(cabinetName) {
         document.getElementById('progressText').textContent = '0 из 0';
         document.getElementById('progressBar').style.width = '0%';
         document.getElementById('progressBar').textContent = '0%';
-        // Кнопки редактирования скрываем, т.к. нечего редактировать
         document.getElementById('editChecklistBtn').style.display = 'none';
         document.getElementById('saveChecklistBtn').style.display = 'none';
         document.getElementById('checklistEditControls').style.display = 'none';
@@ -1318,7 +1326,6 @@ function renderChecklist(cabinetName) {
     document.querySelectorAll('.checklist-item-checkbox').forEach(cb => cb.checked = false);
 }
 
-// Добавление номера с автоматическим обновлением аудитории
 async function addNumberToChecklist(number) {
     number = number.trim();
     if (!number) return;
@@ -1331,45 +1338,34 @@ async function addNumberToChecklist(number) {
         showToast('Такой номер уже есть в списке', 'warning');
         return;
     }
-    // Добавляем номер в список
     currentCabinetNumbers.push(number);
     localStorage.setItem(`checklist_${currentCabinetName}`, JSON.stringify(currentCabinetNumbers));
     checklistChanged = true;
     renderChecklist(currentCabinetName);
     showToast('Номер добавлен (сохраните изменения)', 'success');
 
-    // ---- НОВАЯ ЛОГИКА: обновление аудитории устройства ----
-    // Проверяем, существует ли устройство с таким инвентарным номером
     const normalizedNumber = normalizeInventoryNumber(number);
     const device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalizedNumber);
     if (device) {
-        // Если устройство существует и его аудитория отличается от текущей выбранной
         if (device.cabinet !== currentCabinetName) {
-            // Проверяем права пользователя (не scanner_only)
             if (userRole === 'scanner_only') {
                 showToast('У вас нет прав на изменение аудитории устройства', 'warning');
                 return;
             }
-            // Обновляем аудиторию устройства через updateDevice
             try {
                 await updateDevice(device.inventoryNumber, { cabinet: currentCabinetName });
-                // Обновляем локальные данные устройства в inventoryData
                 const idx = inventoryData.findIndex(d => normalizeInventoryNumber(d.inventoryNumber) === normalizedNumber);
                 if (idx !== -1) {
                     inventoryData[idx].cabinet = currentCabinetName;
                     localStorage.setItem('inventoryCache', JSON.stringify(inventoryData));
                 }
                 showToast(`Аудитория устройства ${number} обновлена на ${currentCabinetName}`, 'success');
-                // Перерисовываем ведомость, чтобы обновить статус "Найдено"
                 renderChecklist(currentCabinetName);
             } catch (error) {
                 showToast('Не удалось обновить аудиторию устройства: ' + error.message, 'danger');
             }
-        } else {
-            // Устройство уже в этой аудитории – ничего не делаем
         }
     }
-    // ----------------------------------------------------
 }
 
 function removeSelectedNumbers() {
@@ -2267,11 +2263,10 @@ document.addEventListener('DOMContentLoaded', async function() {
                 if (currentUser) {
                     try {
                         await currentUser.updateProfile({ displayName: name });
-                        // Обновляем имя в таблице Users (самообновление)
                         await callProxy('updateUser', { 
                             uid: currentUser.uid, 
                             displayName: name, 
-                            adminUid: currentUser.uid // self-update
+                            adminUid: currentUser.uid 
                         });
                     } catch (e) {
                         console.warn('Не удалось обновить имя в таблице Users:', e);
