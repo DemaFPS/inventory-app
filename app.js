@@ -1,6 +1,14 @@
 /**
  * app.js – ИТОГОВАЯ ВЕРСИЯ с ролью по умолчанию "scanner_only"
  * и исправленным бесконечным обновлением ведомости
+ * 
+ * ИСПРАВЛЕНИЯ БАГОВ:
+ * 1. В режиме "только сканера" скрыты кнопки "Оборотная ведомость" и "Отчёт" на главном экране
+ * 2. Исправлено редактирование ячеек в таблице (смещение индексов устранено в GAS)
+ * 3. Смена имени через главный экран теперь обновляет запись в таблице Users
+ * 4. В модалке создания устройства селект аудитории по умолчанию показывает "— Не выбрана —"
+ * 5. Кнопки "Добавить" и "Удалить выбранные" в ведомости работают только в режиме редактирования
+ * 6. Экран загрузки скрывается быстрее (syncPendingData запускается в фоне)
  */
 
 // ============================
@@ -22,7 +30,7 @@ const auth = firebase.auth();
 // ============================
 // 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycby_fo2WPnW3QPe6fEWn8vCpJhEluLs_Jy-R_uvSt8IALoFVVCSmlMtz9oS3a6UUcDa_/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbzDCYErFzPy-tAuk3tKyKzIE424D1EHIe1XZNPUHw3-_8wxZjnEKmN03H97an4FzVyq/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -426,19 +434,30 @@ async function loadUserRole() {
     // Если пришла роль 'user' – считаем как scanner_only
     if (effectiveRole === 'user') effectiveRole = 'scanner_only';
 
+    // ===== БАГ 1: скрываем кнопки на главном экране =====
+    const mainChecklistBtn = document.getElementById('checklistBtn');
+    const mainReportBtn = document.getElementById('reportBtn');
+
     if (effectiveRole === 'admin') {
       allNavBtns.forEach(btn => { if (btn) btn.style.display = 'flex'; });
       isAdmin = true;
+      if (mainChecklistBtn) mainChecklistBtn.style.display = 'block';
+      if (mainReportBtn) mainReportBtn.style.display = 'block';
     } else if (effectiveRole === 'full') {
       [navBtnChecklist, navBtnReport, navBtnLogs, navBtnData, navBtnScanner, navBtnDashboard].forEach(btn => {
         if (btn) btn.style.display = 'flex';
       });
       if (navBtnUsers) navBtnUsers.style.display = 'none';
       isAdmin = false;
+      if (mainChecklistBtn) mainChecklistBtn.style.display = 'block';
+      if (mainReportBtn) mainReportBtn.style.display = 'block';
     } else { // scanner_only или неизвестная
       if (navBtnDashboard) navBtnDashboard.style.display = 'flex';
       if (navBtnScanner) navBtnScanner.style.display = 'flex';
       isAdmin = false;
+      // Скрываем кнопки на главном экране для scanner_only
+      if (mainChecklistBtn) mainChecklistBtn.style.display = 'none';
+      if (mainReportBtn) mainReportBtn.style.display = 'none';
     }
 
     console.log('Роль пользователя:', userRole, 'Заблокирован:', userBlocked);
@@ -449,6 +468,10 @@ async function loadUserRole() {
     isAdmin = false;
     document.querySelector('.nav-btn[data-screen="dashboard"]').style.display = 'flex';
     document.querySelector('.nav-btn[data-screen="scanner"]').style.display = 'flex';
+    // Показываем кнопки на главном экране только если роль не scanner_only
+    // По умолчанию оставляем их видимыми, но для безопасности скрываем
+    document.getElementById('checklistBtn').style.display = 'none';
+    document.getElementById('reportBtn').style.display = 'none';
   }
 }
 
@@ -1458,7 +1481,8 @@ function renderTable(data) {
             const sheetRow = parseInt(tr2.querySelector('.row-selector').dataset.sheetRow);
             const sheet = document.getElementById('sheetSelect').value;
             if (sheetRow && colIdx >= 0) {
-                callProxy('updateCell', { sheetName: sheet, row: sheetRow, col: colIdx, value: newValue, uid: currentUser ? currentUser.uid : null }).catch(() => {});
+                // Передаём row и col как 1-индексированные (они уже таковы)
+                callProxy('updateCell', { sheetName: sheet, row: sheetRow, col: colIdx + 1, value: newValue, uid: currentUser ? currentUser.uid : null }).catch(() => {});
             }
         });
         td.addEventListener('focus', function() {
@@ -2047,7 +2071,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         await loadInventory();
         updateDashboardStats();
         await loadCabinetSelect();
-        await syncPendingData();
+        // БАГ 6: запускаем синхронизацию в фоне без await
+        syncPendingData();
 
         const themeToggle = document.getElementById('themeToggle');
         const root = document.documentElement;
@@ -2130,14 +2155,25 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         });
 
-        document.getElementById('changeNameBtn')?.addEventListener('click', function() {
+        // БАГ 3: обработчик смены имени с обновлением в таблице Users
+        document.getElementById('changeNameBtn')?.addEventListener('click', async function() {
             const newName = prompt('Введите ваше имя (для отображения в истории):', localUserName);
             if (newName && newName.trim()) {
                 const name = newName.trim();
                 localStorage.setItem('localUserName', name);
                 localUserName = name;
                 if (currentUser) {
-                    currentUser.updateProfile({ displayName: name }).catch(() => {});
+                    try {
+                        await currentUser.updateProfile({ displayName: name });
+                        // Обновить запись в таблице Users (self-update)
+                        await callProxy('updateUser', { 
+                            uid: currentUser.uid, 
+                            displayName: name, 
+                            adminUid: currentUser.uid 
+                        });
+                    } catch (e) {
+                        console.warn('Не удалось обновить имя в таблице Users:', e);
+                    }
                 }
                 document.getElementById('userDisplay').textContent = name;
                 showToast('Имя обновлено', 'success');
@@ -2287,6 +2323,11 @@ document.addEventListener('DOMContentLoaded', async function() {
                     renderChecklist(cabinet);
                 }
             } else {
+                // БАГ 5: сброс режима редактирования при выборе пустой аудитории
+                isChecklistEditMode = false;
+                document.getElementById('editChecklistBtn').style.display = 'inline-block';
+                document.getElementById('saveChecklistBtn').style.display = 'none';
+                document.getElementById('checklistEditControls').style.display = 'none';
                 document.getElementById('checklistItems').innerHTML = '<div class="text-muted">Выберите аудиторию</div>';
                 document.getElementById('progressText').textContent = '0 из 0';
                 document.getElementById('progressBar').style.width = '0%';
@@ -2320,6 +2361,10 @@ document.addEventListener('DOMContentLoaded', async function() {
                 showToast('У вас нет прав на добавление', 'warning');
                 return;
             }
+            if (!isChecklistEditMode) {
+                showToast('Сначала включите режим редактирования', 'warning');
+                return;
+            }
             const input = document.getElementById('newChecklistItemInput');
             if (!input || !input.value.trim()) {
                 showToast('Введите инвентарный номер', 'warning');
@@ -2333,6 +2378,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         document.getElementById('removeSelectedChecklistBtn')?.addEventListener('click', function() {
             if (userRole === 'scanner_only') {
                 showToast('У вас нет прав на удаление', 'warning');
+                return;
+            }
+            if (!isChecklistEditMode) {
+                showToast('Сначала включите режим редактирования', 'warning');
                 return;
             }
             removeSelectedNumbers();
@@ -2459,6 +2508,8 @@ document.addEventListener('DOMContentLoaded', async function() {
                             select.appendChild(opt);
                         }
                     });
+                    // БАГ 4: устанавливаем значение по умолчанию "— Не выбрана —"
+                    select.value = '';
                 }
             });
         }
