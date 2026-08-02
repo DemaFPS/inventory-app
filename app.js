@@ -8,7 +8,8 @@
  * 3. Смена имени через главный экран теперь обновляет запись в таблице Users
  * 4. В модалке создания устройства селект аудитории по умолчанию показывает "— Не выбрана —"
  * 5. Кнопки "Добавить" и "Удалить выбранные" в ведомости работают только в режиме редактирования
- * 6. Экран загрузки скрывается быстрее (syncPendingData запускается в фоне)
+ * 6. Экран загрузки скрывается ТОЛЬКО ПОСЛЕ загрузки данных (таймаут 30 сек)
+ * 7. loadCabinetSelect и syncPendingData выполняются в фоне, не блокируя интерфейс
  */
 
 // ============================
@@ -30,7 +31,7 @@ const auth = firebase.auth();
 // ============================
 // 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbzDCYErFzPy-tAuk3tKyKzIE424D1EHIe1XZNPUHw3-_8wxZjnEKmN03H97an4FzVyq/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbxGzjaW2KXz6tbYnOYq8k_FRL3m_7n5CL54VZPcYwfPkTkcVzCBg8Z5sl4G-_gMuAPw/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -1602,8 +1603,16 @@ async function syncPendingData() {
         renderLogs();
     }
 
-    await loadInventory();
+    // Убираем повторный вызов loadInventory() – данные уже актуальны
+    // Просто обновляем статистику и карточку при необходимости
     updateDashboardStats();
+    if (currentDevice) {
+        const updated = inventoryData.find(d => d && d.inventoryNumber === currentDevice.inventoryNumber);
+        if (updated) {
+            currentDevice = updated;
+            await renderDeviceCard(updated);
+        }
+    }
 }
 
 // ============================
@@ -2006,17 +2015,19 @@ function updateActivePill(smooth = true) {
 // 17. ИНИЦИАЛИЗАЦИЯ
 // ============================
 document.addEventListener('DOMContentLoaded', async function() {
+    // Увеличенный таймаут (30 сек) – крайний случай
     const forceHideLoading = setTimeout(() => {
         const loadingScreen = document.getElementById('loading-screen');
         if (loadingScreen && !loadingScreen.classList.contains('hidden')) {
             loadingScreen.classList.add('hidden');
             const container = document.getElementById('appContainer');
             if (container) container.style.display = 'block';
-            console.warn('Загрузка принудительно скрыта по таймауту');
+            console.warn('Загрузка принудительно скрыта по таймауту (30 сек)');
         }
-    }, 10000);
+    }, 30000);
 
     try {
+        // Авторизация
         await new Promise((resolve) => {
             auth.onAuthStateChanged(async user => {
                 try {
@@ -2068,12 +2079,17 @@ document.addEventListener('DOMContentLoaded', async function() {
             });
         });
 
+        // КРИТИЧЕСКАЯ ЗАГРУЗКА ДАННЫХ – ждём её завершения
         await loadInventory();
         updateDashboardStats();
-        await loadCabinetSelect();
-        // БАГ 6: запускаем синхронизацию в фоне без await
+
+        // Загрузка селекта аудиторий – в фоне, не блокируем интерфейс
+        loadCabinetSelect();
+
+        // Синхронизация в фоне (без повторной загрузки)
         syncPendingData();
 
+        // Настройка темы
         const themeToggle = document.getElementById('themeToggle');
         const root = document.documentElement;
         const savedTheme = localStorage.getItem('appTheme');
@@ -2092,6 +2108,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             });
         }
 
+        // Активная подсветка
         activePill = document.getElementById('active-pill');
         navButtons = document.querySelectorAll('.nav-btn');
 
@@ -2650,13 +2667,10 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         }, 300000);
 
+        // Показываем главный экран
         showScreen('dashboard');
 
-    } catch (error) {
-        console.error('Критическая ошибка инициализации:', error);
-        showToast('Ошибка загрузки приложения: ' + error.message, 'danger');
-    } finally {
-        clearTimeout(forceHideLoading);
+        // Теперь, когда все критичные данные загружены, скрываем загрузочный экран
         const loadingScreen = document.getElementById('loading-screen');
         if (loadingScreen) {
             loadingScreen.classList.add('hidden');
@@ -2664,8 +2678,33 @@ document.addEventListener('DOMContentLoaded', async function() {
         const container = document.getElementById('appContainer');
         if (container) {
             container.style.display = 'block';
-        } else {
-            console.warn('Элемент #appContainer не найден, но загрузка скрыта');
+        }
+        // Таймаут больше не нужен – отменяем
+        clearTimeout(forceHideLoading);
+
+    } catch (error) {
+        console.error('Критическая ошибка инициализации:', error);
+        showToast('Ошибка загрузки приложения: ' + error.message, 'danger');
+        // Всё равно скрываем загрузку, чтобы пользователь мог что-то делать
+        const loadingScreen = document.getElementById('loading-screen');
+        if (loadingScreen) {
+            loadingScreen.classList.add('hidden');
+        }
+        const container = document.getElementById('appContainer');
+        if (container) {
+            container.style.display = 'block';
+        }
+    } finally {
+        // Таймаут уже очищен, но на всякий случай
+        clearTimeout(forceHideLoading);
+        // Дублируем скрытие на случай, если что-то пошло не так
+        const loadingScreen = document.getElementById('loading-screen');
+        if (loadingScreen && !loadingScreen.classList.contains('hidden')) {
+            loadingScreen.classList.add('hidden');
+        }
+        const container = document.getElementById('appContainer');
+        if (container && container.style.display === 'none') {
+            container.style.display = 'block';
         }
     }
 });
