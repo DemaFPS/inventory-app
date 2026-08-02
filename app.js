@@ -1,5 +1,5 @@
 /**
- * app.js – ИТОГОВАЯ ВЕРСИЯ с ролями, обновлённой ведомостью и оптимизациями
+ * app.js – ИТОГОВАЯ ВЕРСИЯ с ролями, блокировкой, управлением пользователями
  */
 
 // ============================
@@ -21,7 +21,7 @@ const auth = firebase.auth();
 // ============================
 // 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbyTRH8-uJS4xQMr3qgyZfr5BL2jlMCaC5Yhu0-RGdM27taNNy7s4-R_rMVWCEpacXj-/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbxepmXazN40QjkVWXiR5VbeKPyzrvD0kSYQHuN6Zgb8K9MVoklmtVyS8i8R0Kb94FAO/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -55,6 +55,8 @@ let checklistChanged = false;
 
 // ===== ПЕРЕМЕННЫЕ ДЛЯ РОЛЕЙ =====
 let isAdmin = false;
+let userRole = 'user';
+let userBlocked = false;
 let usersList = [];
 
 // ============================
@@ -389,7 +391,7 @@ async function updateCabinetList(cabinetName, inventoryNumbers) {
 }
 
 // ============================
-// 5. ФУНКЦИИ ДЛЯ РОЛЕЙ
+// 5. ФУНКЦИИ ДЛЯ РОЛЕЙ И БЛОКИРОВКИ
 // ============================
 async function loadUserRole() {
   if (!currentUser) return;
@@ -397,18 +399,60 @@ async function loadUserRole() {
   const displayName = currentUser.displayName || localUserName || 'Аноним';
   try {
     const result = await callProxy('getUserRole', { uid, displayName });
-    if (result && result.role === 'admin') {
-      isAdmin = true;
-      document.querySelector('.nav-btn[data-screen="users"]').style.display = 'flex';
-    } else {
-      isAdmin = false;
-      document.querySelector('.nav-btn[data-screen="users"]').style.display = 'none';
+    userRole = result.role || 'user';
+    userBlocked = result.blocked === true;
+    
+    if (userBlocked) {
+      showBlockedScreen();
+      return;
     }
-    console.log('Роль пользователя:', isAdmin ? 'admin' : 'user');
+
+    // Настройка навигации в зависимости от роли
+    const navBtnUsers = document.querySelector('.nav-btn[data-screen="users"]');
+    const navBtnChecklist = document.querySelector('.nav-btn[data-screen="checklist"]');
+    const navBtnReport = document.querySelector('.nav-btn[data-screen="report"]');
+    const navBtnLogs = document.querySelector('.nav-btn[data-screen="logs"]');
+    const navBtnData = document.querySelector('.nav-btn[data-screen="data"]');
+    const navBtnScanner = document.querySelector('.nav-btn[data-screen="scanner"]');
+    const navBtnDashboard = document.querySelector('.nav-btn[data-screen="dashboard"]');
+
+    // По умолчанию все скрыты
+    const allNavBtns = [navBtnUsers, navBtnChecklist, navBtnReport, navBtnLogs, navBtnData, navBtnScanner, navBtnDashboard];
+    allNavBtns.forEach(btn => { if (btn) btn.style.display = 'none'; });
+
+    if (userRole === 'admin') {
+      allNavBtns.forEach(btn => { if (btn) btn.style.display = 'flex'; });
+      isAdmin = true;
+    } else if (userRole === 'full' || userRole === 'user') {
+      [navBtnChecklist, navBtnReport, navBtnLogs, navBtnData, navBtnScanner, navBtnDashboard].forEach(btn => {
+        if (btn) btn.style.display = 'flex';
+      });
+      if (navBtnUsers) navBtnUsers.style.display = 'none';
+      isAdmin = false;
+    } else { // 'scanner_only'
+      if (navBtnDashboard) navBtnDashboard.style.display = 'flex';
+      if (navBtnScanner) navBtnScanner.style.display = 'flex';
+      isAdmin = false;
+    }
+
+    console.log('Роль пользователя:', userRole, 'Заблокирован:', userBlocked);
   } catch (error) {
     console.warn('Ошибка получения роли:', error);
+    userRole = 'user';
+    userBlocked = false;
     isAdmin = false;
+    document.querySelector('.nav-btn[data-screen="dashboard"]').style.display = 'flex';
+    document.querySelector('.nav-btn[data-screen="scanner"]').style.display = 'flex';
   }
+}
+
+function showBlockedScreen() {
+  document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
+  const blockedScreen = document.getElementById('blocked-screen');
+  if (blockedScreen) blockedScreen.classList.add('active');
+  document.getElementById('bottomNav').style.display = 'none';
+  document.getElementById('appContainer').style.display = 'block';
+  showToast('Ваш аккаунт заблокирован администратором', 'danger');
 }
 
 async function promoteToAdmin() {
@@ -421,8 +465,7 @@ async function promoteToAdmin() {
   try {
     const result = await callProxy('promoteToAdmin', { uid: currentUser.uid, masterPassword: password });
     showToast(result.message || 'Вы стали администратором!', 'success');
-    isAdmin = true;
-    document.querySelector('.nav-btn[data-screen="users"]').style.display = 'flex';
+    await loadUserRole();
   } catch (error) {
     showToast('Ошибка: ' + error.message, 'danger');
   }
@@ -446,7 +489,7 @@ function renderUsersTable(users) {
   const container = document.getElementById('usersTableBody');
   if (!container) return;
   if (!users || users.length === 0) {
-    container.innerHTML = '<tr><td colspan="4" class="text-muted">Нет пользователей</td></tr>';
+    container.innerHTML = '<tr><td colspan="5" class="text-muted">Нет пользователей</td></tr>';
     return;
   }
   let html = '';
@@ -454,14 +497,23 @@ function renderUsersTable(users) {
     html += `
       <tr>
         <td>${index + 1}</td>
-        <td>${user.displayName || 'Без имени'}</td>
+        <td>
+          <input type="text" class="form-control form-control-sm user-name-input" value="${user.displayName || ''}" data-uid="${user.uid}">
+        </td>
         <td>
           <select class="form-select form-select-sm user-role-select" data-uid="${user.uid}">
-            <option value="user" ${user.role === 'user' ? 'selected' : ''}>Пользователь</option>
+            <option value="scanner_only" ${user.role === 'scanner_only' ? 'selected' : ''}>Только сканер</option>
+            <option value="full" ${user.role === 'full' || user.role === 'user' && user.role !== 'scanner_only' && user.role !== 'admin' ? 'selected' : ''}>Полный доступ</option>
             <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Администратор</option>
           </select>
         </td>
         <td>
+          <div class="form-check form-switch">
+            <input class="form-check-input user-blocked-checkbox" type="checkbox" ${user.blocked ? 'checked' : ''} data-uid="${user.uid}">
+          </div>
+        </td>
+        <td>
+          <button class="btn btn-sm btn-primary save-user-btn" data-uid="${user.uid}">Сохранить</button>
           <button class="btn btn-sm btn-outline-danger delete-user-btn" data-uid="${user.uid}">Удалить</button>
         </td>
       </tr>
@@ -469,11 +521,14 @@ function renderUsersTable(users) {
   });
   container.innerHTML = html;
 
-  document.querySelectorAll('.user-role-select').forEach(select => {
-    select.addEventListener('change', async function() {
+  document.querySelectorAll('.save-user-btn').forEach(btn => {
+    btn.addEventListener('click', async function() {
       const uid = this.dataset.uid;
-      const newRole = this.value;
-      await updateUserRole(uid, newRole);
+      const row = this.closest('tr');
+      const displayName = row.querySelector('.user-name-input').value.trim();
+      const role = row.querySelector('.user-role-select').value;
+      const blocked = row.querySelector('.user-blocked-checkbox').checked;
+      await updateUser(uid, { displayName, role, blocked });
     });
   });
 
@@ -487,19 +542,26 @@ function renderUsersTable(users) {
   });
 }
 
-async function updateUserRole(uid, newRole) {
+async function updateUser(uid, data) {
   if (!isAdmin) return;
   try {
-    await callProxy('updateUserRole', { uid, newRole, adminUid: currentUser.uid });
-    showToast('Роль обновлена', 'success');
+    await callProxy('updateUser', { 
+      uid, 
+      displayName: data.displayName, 
+      role: data.role, 
+      blocked: data.blocked,
+      adminUid: currentUser.uid 
+    });
+    showToast('Данные пользователя обновлены', 'success');
     await loadUsers();
   } catch (error) {
-    showToast('Ошибка: ' + error.message, 'danger');
+    showToast('Ошибка обновления: ' + error.message, 'danger');
   }
 }
 
 async function deleteUser(uid) {
   if (!isAdmin) return;
+  if (!confirm('Удалить пользователя?')) return;
   try {
     await callProxy('deleteUser', { uid, adminUid: currentUser.uid });
     showToast('Пользователь удалён', 'success');
@@ -711,12 +773,18 @@ async function onScanSuccess(decodedText, decodedResult) {
 function onScanError(err) { /* игнорируем */ }
 
 async function processScannedBarcode(rawText) {
+    // Для scanner_only: только просмотр, без создания
     const normalized = normalizeInventoryNumber(rawText);
     let device = inventoryData.find(d => normalizeInventoryNumber(d.inventoryNumber) === normalized);
     if (device) {
         currentDevice = device;
         showScreen('deviceCard');
         await renderDeviceCard(device);
+        return;
+    }
+
+    if (userRole === 'scanner_only') {
+        showToast('Устройство не найдено. У вас нет прав на создание.', 'warning');
         return;
     }
 
@@ -822,6 +890,10 @@ async function renderDeviceCard(device) {
 }
 
 async function performDeviceAction(action, data = {}) {
+    if (userRole === 'scanner_only') {
+        showToast('У вас нет прав на выполнение этого действия', 'warning');
+        return;
+    }
     if (!currentDevice) {
         showToast('Устройство не выбрано', 'warning');
         return;
@@ -1569,6 +1641,10 @@ window.createFromLog = function(inventoryNumber) {
 // 14. МОДАЛКА СОЗДАНИЯ
 // ============================
 function showCreateDeviceModal(inventoryNumber) {
+    if (userRole === 'scanner_only') {
+        showToast('У вас нет прав на создание устройств', 'warning');
+        return;
+    }
     document.getElementById('createInventoryNumber').value = inventoryNumber;
     document.getElementById('createModel').value = '';
     document.getElementById('createSerial').value = '';
@@ -1580,6 +1656,10 @@ function showCreateDeviceModal(inventoryNumber) {
 }
 
 async function confirmCreateDevice() {
+    if (userRole === 'scanner_only') {
+        showToast('У вас нет прав на создание устройств', 'warning');
+        return;
+    }
     if (isCreating) {
         showToast('Подождите, идёт создание...', 'warning');
         return;
@@ -2050,6 +2130,10 @@ document.addEventListener('DOMContentLoaded', async function() {
 
         // Карточка
         document.getElementById('editBtn')?.addEventListener('click', function() {
+            if (userRole === 'scanner_only') {
+                showToast('У вас нет прав на редактирование', 'warning');
+                return;
+            }
             if (!currentDevice) {
                 showToast('Устройство не выбрано', 'warning');
                 return;
@@ -2065,6 +2149,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
 
         document.getElementById('confirmEdit')?.addEventListener('click', async function() {
+            if (userRole === 'scanner_only') {
+                showToast('У вас нет прав на редактирование', 'warning');
+                return;
+            }
             const model = document.getElementById('editModel').value.trim();
             const serial = document.getElementById('editSerial').value.trim();
             const responsible = document.getElementById('editResponsible').value.trim();
@@ -2083,6 +2171,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
 
         document.getElementById('transferBtn')?.addEventListener('click', function() {
+            if (userRole === 'scanner_only') {
+                showToast('У вас нет прав на передачу', 'warning');
+                return;
+            }
             if (!currentDevice) {
                 showToast('Устройство не выбрано', 'warning');
                 return;
@@ -2091,6 +2183,10 @@ document.addEventListener('DOMContentLoaded', async function() {
             modal.show();
         });
         document.getElementById('confirmTransfer')?.addEventListener('click', async function() {
+            if (userRole === 'scanner_only') {
+                showToast('У вас нет прав на передачу', 'warning');
+                return;
+            }
             const fio = document.getElementById('transferFio')?.value.trim();
             const comment = document.getElementById('transferComment')?.value.trim();
             if (!fio || !comment) {
@@ -2105,6 +2201,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
 
         document.getElementById('repairBtn')?.addEventListener('click', async function() {
+            if (userRole === 'scanner_only') {
+                showToast('У вас нет прав на ремонт', 'warning');
+                return;
+            }
             if (!currentDevice) {
                 showToast('Устройство не выбрано', 'warning');
                 return;
@@ -2114,6 +2214,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
 
         document.getElementById('stockBtn')?.addEventListener('click', async function() {
+            if (userRole === 'scanner_only') {
+                showToast('У вас нет прав на перемещение на склад', 'warning');
+                return;
+            }
             if (!currentDevice) {
                 showToast('Устройство не выбрано', 'warning');
                 return;
@@ -2123,6 +2227,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
 
         document.getElementById('scrapBtn')?.addEventListener('click', function() {
+            if (userRole === 'scanner_only') {
+                showToast('У вас нет прав на списание', 'warning');
+                return;
+            }
             if (!currentDevice) {
                 showToast('Устройство не выбрано', 'warning');
                 return;
@@ -2132,6 +2240,10 @@ document.addEventListener('DOMContentLoaded', async function() {
             modal.show();
         });
         document.getElementById('confirmScrap')?.addEventListener('click', async function() {
+            if (userRole === 'scanner_only') {
+                showToast('У вас нет прав на списание', 'warning');
+                return;
+            }
             const comment = document.getElementById('scrapComment')?.value.trim();
             const modal = bootstrap.Modal.getInstance(document.getElementById('scrapModal'));
             if (modal) modal.hide();
@@ -2159,6 +2271,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
 
         document.getElementById('editChecklistBtn')?.addEventListener('click', function() {
+            if (userRole === 'scanner_only') {
+                showToast('У вас нет прав на редактирование ведомости', 'warning');
+                return;
+            }
             if (!currentCabinetName) {
                 showToast('Выберите аудиторию', 'warning');
                 return;
@@ -2168,10 +2284,18 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
 
         document.getElementById('saveChecklistBtn')?.addEventListener('click', function() {
+            if (userRole === 'scanner_only') {
+                showToast('У вас нет прав на сохранение ведомости', 'warning');
+                return;
+            }
             saveChecklistChanges();
         });
 
         document.getElementById('addChecklistItemBtn')?.addEventListener('click', function() {
+            if (userRole === 'scanner_only') {
+                showToast('У вас нет прав на добавление', 'warning');
+                return;
+            }
             const input = document.getElementById('newChecklistItemInput');
             if (!input || !input.value.trim()) {
                 showToast('Введите инвентарный номер', 'warning');
@@ -2183,6 +2307,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
 
         document.getElementById('removeSelectedChecklistBtn')?.addEventListener('click', function() {
+            if (userRole === 'scanner_only') {
+                showToast('У вас нет прав на удаление', 'warning');
+                return;
+            }
             removeSelectedNumbers();
         });
 
@@ -2248,6 +2376,10 @@ document.addEventListener('DOMContentLoaded', async function() {
             }, 300);
         });
         document.getElementById('addRowBtn')?.addEventListener('click', async function() {
+            if (userRole === 'scanner_only') {
+                showToast('У вас нет прав на добавление строк', 'warning');
+                return;
+            }
             if (!tableHeaders.length) {
                 showToast('Сначала загрузите данные', 'warning');
                 return;
@@ -2263,6 +2395,10 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         });
         document.getElementById('deleteRowsBtn')?.addEventListener('click', async function() {
+            if (userRole === 'scanner_only') {
+                showToast('У вас нет прав на удаление строк', 'warning');
+                return;
+            }
             const checked = document.querySelectorAll('.row-selector:checked');
             if (checked.length === 0) {
                 showToast('Выберите строки для удаления', 'warning');
