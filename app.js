@@ -8,8 +8,8 @@
  * 3. Смена имени через главный экран теперь обновляет запись в таблице Users
  * 4. В модалке создания устройства селект аудитории по умолчанию показывает "— Не выбрана —"
  * 5. Кнопки "Добавить" и "Удалить выбранные" в ведомости работают только в режиме редактирования
- * 6. Экран загрузки скрывается ТОЛЬКО ПОСЛЕ загрузки данных (таймаут 30 сек)
- * 7. loadCabinetSelect и syncPendingData выполняются в фоне, не блокируя интерфейс
+ * 6. Экран загрузки скрывается только ПОСЛЕ загрузки данных (таймаут 30 сек)
+ * 7. Ускорена загрузка ведомости: кэш + таймаут 3 сек + фоновое обновление
  */
 
 // ============================
@@ -432,10 +432,8 @@ async function loadUserRole() {
     allNavBtns.forEach(btn => { if (btn) btn.style.display = 'none'; });
 
     let effectiveRole = userRole;
-    // Если пришла роль 'user' – считаем как scanner_only
     if (effectiveRole === 'user') effectiveRole = 'scanner_only';
 
-    // ===== БАГ 1: скрываем кнопки на главном экране =====
     const mainChecklistBtn = document.getElementById('checklistBtn');
     const mainReportBtn = document.getElementById('reportBtn');
 
@@ -452,11 +450,10 @@ async function loadUserRole() {
       isAdmin = false;
       if (mainChecklistBtn) mainChecklistBtn.style.display = 'block';
       if (mainReportBtn) mainReportBtn.style.display = 'block';
-    } else { // scanner_only или неизвестная
+    } else { // scanner_only
       if (navBtnDashboard) navBtnDashboard.style.display = 'flex';
       if (navBtnScanner) navBtnScanner.style.display = 'flex';
       isAdmin = false;
-      // Скрываем кнопки на главном экране для scanner_only
       if (mainChecklistBtn) mainChecklistBtn.style.display = 'none';
       if (mainReportBtn) mainReportBtn.style.display = 'none';
     }
@@ -469,8 +466,6 @@ async function loadUserRole() {
     isAdmin = false;
     document.querySelector('.nav-btn[data-screen="dashboard"]').style.display = 'flex';
     document.querySelector('.nav-btn[data-screen="scanner"]').style.display = 'flex';
-    // Показываем кнопки на главном экране только если роль не scanner_only
-    // По умолчанию оставляем их видимыми, но для безопасности скрываем
     document.getElementById('checklistBtn').style.display = 'none';
     document.getElementById('reportBtn').style.display = 'none';
   }
@@ -1074,7 +1069,7 @@ function removePendingAction(inventoryNumber) {
 }
 
 // ============================
-// 10. ОБОРОТНАЯ ВЕДОМОСТЬ (с исправлением бесконечного цикла)
+// 10. ОБОРОТНАЯ ВЕДОМОСТЬ (УСКОРЕННАЯ)
 // ============================
 async function loadCabinetSelect() {
     const select = document.getElementById('cabinetSelect');
@@ -1100,11 +1095,10 @@ async function loadCabinetSelect() {
     }
 }
 
+// Ускоренная загрузка ведомости с кэшем и таймаутом
 async function loadChecklistData(cabinetName, forceRefresh = false) {
-    // Защита от повторного вызова
     if (isLoadingChecklist) return;
     if (!cabinetName) return;
-    // Если уже загружена та же аудитория и не принудительно – выходим
     if (cabinetName === currentCabinetName && !forceRefresh && currentCabinetNumbers.length > 0) {
         return;
     }
@@ -1114,15 +1108,17 @@ async function loadChecklistData(cabinetName, forceRefresh = false) {
 
     const cacheKey = `checklist_${cabinetName}`;
     const cached = localStorage.getItem(cacheKey);
+
+    // Если есть кэш и не принудительное обновление – сразу показываем
     if (cached && !forceRefresh) {
         try {
             const parsed = JSON.parse(cached);
             if (Array.isArray(parsed)) {
                 currentCabinetNumbers = parsed;
                 renderChecklist(cabinetName);
-                // Фоновое обновление с сервера (если есть интернет)
+                // Фоновое обновление (не ждём)
                 if (navigator.onLine) {
-                    updateChecklistFromServer(cabinetName);
+                    updateChecklistFromServer(cabinetName).catch(() => {});
                 }
                 isLoadingChecklist = false;
                 return;
@@ -1130,17 +1126,56 @@ async function loadChecklistData(cabinetName, forceRefresh = false) {
         } catch (e) {}
     }
 
+    // Нет кэша или принудительное обновление – пробуем с сервера с таймаутом
     if (navigator.onLine) {
-        await updateChecklistFromServer(cabinetName);
-    } else {
-        const cab = cabinetsData.find(c => c.cabinet === cabinetName);
-        currentCabinetNumbers = cab ? (cab.inventoryNumbers || []) : [];
-        renderChecklist(cabinetName);
-        showToast('Офлайн-режим: изменения будут сохранены локально', 'warning');
+        try {
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Timeout')), 3000)
+            );
+            const result = await Promise.race([
+                callProxy('getChecklist', { cabinet: cabinetName }),
+                timeoutPromise
+            ]);
+            if (result && Array.isArray(result.numbers)) {
+                currentCabinetNumbers = result.numbers;
+                localStorage.setItem(cacheKey, JSON.stringify(currentCabinetNumbers));
+                const cab = cabinetsData.find(c => c.cabinet === cabinetName);
+                if (cab) {
+                    cab.inventoryNumbers = currentCabinetNumbers;
+                } else {
+                    cabinetsData.push({ cabinet: cabinetName, inventoryNumbers: currentCabinetNumbers });
+                }
+                localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
+                renderChecklist(cabinetName);
+                checklistChanged = false;
+                isLoadingChecklist = false;
+                return;
+            }
+        } catch (error) {
+            console.warn('Не удалось загрузить ведомость с сервера (таймаут или ошибка):', error);
+            // Если есть кэш, используем его (даже если forceRefresh)
+            if (cached) {
+                try {
+                    currentCabinetNumbers = JSON.parse(cached);
+                    renderChecklist(cabinetName);
+                    isLoadingChecklist = false;
+                    return;
+                } catch (e) {}
+            }
+        }
+    }
+
+    // Если ничего не помогло – берём из cabinetsData или пустой список
+    const cab = cabinetsData.find(c => c.cabinet === cabinetName);
+    currentCabinetNumbers = cab ? (cab.inventoryNumbers || []) : [];
+    renderChecklist(cabinetName);
+    if (!navigator.onLine) {
+        showToast('Офлайн-режим: данные из кэша', 'warning');
     }
     isLoadingChecklist = false;
 }
 
+// Фоновое обновление ведомости
 async function updateChecklistFromServer(cabinetName) {
     try {
         const result = await callProxy('getChecklist', { cabinet: cabinetName });
@@ -1154,19 +1189,13 @@ async function updateChecklistFromServer(cabinetName) {
                 cabinetsData.push({ cabinet: cabinetName, inventoryNumbers: currentCabinetNumbers });
             }
             localStorage.setItem('cabinetsCache', JSON.stringify(cabinetsData));
-            renderChecklist(cabinetName);
+            if (currentCabinetName === cabinetName) {
+                renderChecklist(cabinetName);
+            }
             checklistChanged = false;
         }
     } catch (error) {
-        console.warn('Не удалось обновить ведомость с сервера:', error);
-        // Если ошибка, но есть кэш – используем его
-        const cached = localStorage.getItem(`checklist_${cabinetName}`);
-        if (cached) {
-            try {
-                currentCabinetNumbers = JSON.parse(cached);
-                renderChecklist(cabinetName);
-            } catch (e) {}
-        }
+        console.warn('Фоновое обновление ведомости не удалось:', error);
     }
 }
 
@@ -1179,6 +1208,19 @@ function renderChecklist(cabinetName) {
         document.getElementById('editChecklistBtn').style.display = 'none';
         document.getElementById('saveChecklistBtn').style.display = 'none';
         document.getElementById('checklistEditControls').style.display = 'none';
+        return;
+    }
+
+    // Если ещё идёт загрузка и список пуст – показываем спиннер
+    if (isLoadingChecklist && currentCabinetNumbers.length === 0) {
+        document.getElementById('checklistItems').innerHTML = `
+            <div class="text-center py-3">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Загрузка...</span>
+                </div>
+                <div class="mt-2">Загрузка ведомости...</div>
+            </div>
+        `;
         return;
     }
 
@@ -1239,7 +1281,6 @@ function renderChecklist(cabinetName) {
         document.getElementById('checklistEditControls').style.display = 'none';
     }
 
-    // Обработчики для кнопок удаления (пересоздаются при каждом рендере)
     document.querySelectorAll('.remove-checklist-item').forEach(btn => {
         btn.addEventListener('click', function(e) {
             e.stopPropagation();
@@ -1482,7 +1523,6 @@ function renderTable(data) {
             const sheetRow = parseInt(tr2.querySelector('.row-selector').dataset.sheetRow);
             const sheet = document.getElementById('sheetSelect').value;
             if (sheetRow && colIdx >= 0) {
-                // Передаём row и col как 1-индексированные (они уже таковы)
                 callProxy('updateCell', { sheetName: sheet, row: sheetRow, col: colIdx + 1, value: newValue, uid: currentUser ? currentUser.uid : null }).catch(() => {});
             }
         });
@@ -1603,8 +1643,6 @@ async function syncPendingData() {
         renderLogs();
     }
 
-    // Убираем повторный вызов loadInventory() – данные уже актуальны
-    // Просто обновляем статистику и карточку при необходимости
     updateDashboardStats();
     if (currentDevice) {
         const updated = inventoryData.find(d => d && d.inventoryNumber === currentDevice.inventoryNumber);
@@ -2015,7 +2053,6 @@ function updateActivePill(smooth = true) {
 // 17. ИНИЦИАЛИЗАЦИЯ
 // ============================
 document.addEventListener('DOMContentLoaded', async function() {
-    // Увеличенный таймаут (30 сек) – крайний случай
     const forceHideLoading = setTimeout(() => {
         const loadingScreen = document.getElementById('loading-screen');
         if (loadingScreen && !loadingScreen.classList.contains('hidden')) {
@@ -2027,7 +2064,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     }, 30000);
 
     try {
-        // Авторизация
         await new Promise((resolve) => {
             auth.onAuthStateChanged(async user => {
                 try {
@@ -2079,17 +2115,11 @@ document.addEventListener('DOMContentLoaded', async function() {
             });
         });
 
-        // КРИТИЧЕСКАЯ ЗАГРУЗКА ДАННЫХ – ждём её завершения
         await loadInventory();
         updateDashboardStats();
-
-        // Загрузка селекта аудиторий – в фоне, не блокируем интерфейс
         loadCabinetSelect();
-
-        // Синхронизация в фоне (без повторной загрузки)
         syncPendingData();
 
-        // Настройка темы
         const themeToggle = document.getElementById('themeToggle');
         const root = document.documentElement;
         const savedTheme = localStorage.getItem('appTheme');
@@ -2108,7 +2138,6 @@ document.addEventListener('DOMContentLoaded', async function() {
             });
         }
 
-        // Активная подсветка
         activePill = document.getElementById('active-pill');
         navButtons = document.querySelectorAll('.nav-btn');
 
@@ -2172,7 +2201,6 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         });
 
-        // БАГ 3: обработчик смены имени с обновлением в таблице Users
         document.getElementById('changeNameBtn')?.addEventListener('click', async function() {
             const newName = prompt('Введите ваше имя (для отображения в истории):', localUserName);
             if (newName && newName.trim()) {
@@ -2182,7 +2210,6 @@ document.addEventListener('DOMContentLoaded', async function() {
                 if (currentUser) {
                     try {
                         await currentUser.updateProfile({ displayName: name });
-                        // Обновить запись в таблице Users (self-update)
                         await callProxy('updateUser', { 
                             uid: currentUser.uid, 
                             displayName: name, 
@@ -2332,15 +2359,12 @@ document.addEventListener('DOMContentLoaded', async function() {
                     document.getElementById('saveChecklistBtn').style.display = 'none';
                     document.getElementById('checklistEditControls').style.display = 'none';
                 }
-                // Принудительная загрузка, если аудитория изменилась
                 if (cabinet !== currentCabinetName) {
                     loadChecklistData(cabinet, true);
                 } else {
-                    // Если та же аудитория, просто обновляем отображение (возможно, изменились данные)
                     renderChecklist(cabinet);
                 }
             } else {
-                // БАГ 5: сброс режима редактирования при выборе пустой аудитории
                 isChecklistEditMode = false;
                 document.getElementById('editChecklistBtn').style.display = 'inline-block';
                 document.getElementById('saveChecklistBtn').style.display = 'none';
@@ -2510,7 +2534,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         });
 
-        // Модалки создания и редактирования
+        // Модалки
         const createModal = document.getElementById('createDeviceModal');
         if (createModal) {
             createModal.addEventListener('show.bs.modal', function() {
@@ -2525,7 +2549,6 @@ document.addEventListener('DOMContentLoaded', async function() {
                             select.appendChild(opt);
                         }
                     });
-                    // БАГ 4: устанавливаем значение по умолчанию "— Не выбрана —"
                     select.value = '';
                 }
             });
@@ -2553,12 +2576,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
 
         document.getElementById('confirmCreateDevice')?.addEventListener('click', confirmCreateDevice);
-
         document.getElementById('helpBtn')?.addEventListener('click', function() {
             const modal = new bootstrap.Modal(document.getElementById('helpModal'));
             modal.show();
         });
-
         document.getElementById('refreshUsersBtn')?.addEventListener('click', function() {
             loadUsers();
         });
@@ -2667,10 +2688,9 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         }, 300000);
 
-        // Показываем главный экран
         showScreen('dashboard');
 
-        // Теперь, когда все критичные данные загружены, скрываем загрузочный экран
+        // Скрываем загрузку только после загрузки всех критичных данных
         const loadingScreen = document.getElementById('loading-screen');
         if (loadingScreen) {
             loadingScreen.classList.add('hidden');
@@ -2679,13 +2699,11 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (container) {
             container.style.display = 'block';
         }
-        // Таймаут больше не нужен – отменяем
         clearTimeout(forceHideLoading);
 
     } catch (error) {
         console.error('Критическая ошибка инициализации:', error);
         showToast('Ошибка загрузки приложения: ' + error.message, 'danger');
-        // Всё равно скрываем загрузку, чтобы пользователь мог что-то делать
         const loadingScreen = document.getElementById('loading-screen');
         if (loadingScreen) {
             loadingScreen.classList.add('hidden');
@@ -2695,9 +2713,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             container.style.display = 'block';
         }
     } finally {
-        // Таймаут уже очищен, но на всякий случай
         clearTimeout(forceHideLoading);
-        // Дублируем скрытие на случай, если что-то пошло не так
         const loadingScreen = document.getElementById('loading-screen');
         if (loadingScreen && !loadingScreen.classList.contains('hidden')) {
             loadingScreen.classList.add('hidden');
