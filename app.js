@@ -8,7 +8,8 @@
  * 3. Смена имени через главный экран теперь обновляет запись в таблице Users
  * 4. В модалке создания устройства селект аудитории по умолчанию показывает "— Не выбрана —"
  * 5. Кнопки "Добавить" и "Удалить выбранные" в ведомости работают только в режиме редактирования
- * 6. Экран загрузки скрывается быстрее (syncPendingData запускается в фоне)
+ * 6. Экран загрузки скрывается только ПОСЛЕ загрузки данных, таймаут увеличен до 30 сек
+ * 7. Устранена двойная загрузка данных (из syncPendingData убран повторный loadInventory)
  */
 
 // ============================
@@ -30,7 +31,7 @@ const auth = firebase.auth();
 // ============================
 // 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
-const PROXY_URL = 'https://script.google.com/macros/s/AKfycbzDCYErFzPy-tAuk3tKyKzIE424D1EHIe1XZNPUHw3-_8wxZjnEKmN03H97an4FzVyq/exec';
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbxGzjaW2KXz6tbYnOYq8k_FRL3m_7n5CL54VZPcYwfPkTkcVzCBg8Z5sl4G-_gMuAPw/exec';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -141,8 +142,16 @@ function showScreen(screenId) {
     if (screenId === 'dashboard') updateDashboardStats();
     if (screenId === 'logs') renderLogs();
     if (screenId === 'checklist') {
+        if (cabinetsData.length === 0) {
+            loadCabinetSelect(); // асинхронно, без await
+        }
         const cabinet = document.getElementById('cabinetSelect')?.value;
         if (cabinet) loadChecklistData(cabinet, false);
+    }
+    if (screenId === 'report') {
+        if (cabinetsData.length === 0) {
+            loadCabinetSelect();
+        }
     }
     if (screenId === 'data') loadSheetData(document.getElementById('sheetSelect')?.value || 'Inventory');
     setTimeout(updateActivePill, 50);
@@ -431,10 +440,9 @@ async function loadUserRole() {
     allNavBtns.forEach(btn => { if (btn) btn.style.display = 'none'; });
 
     let effectiveRole = userRole;
-    // Если пришла роль 'user' – считаем как scanner_only
     if (effectiveRole === 'user') effectiveRole = 'scanner_only';
 
-    // ===== БАГ 1: скрываем кнопки на главном экране =====
+    // БАГ 1: управление кнопками на главном экране
     const mainChecklistBtn = document.getElementById('checklistBtn');
     const mainReportBtn = document.getElementById('reportBtn');
 
@@ -451,11 +459,10 @@ async function loadUserRole() {
       isAdmin = false;
       if (mainChecklistBtn) mainChecklistBtn.style.display = 'block';
       if (mainReportBtn) mainReportBtn.style.display = 'block';
-    } else { // scanner_only или неизвестная
+    } else { // scanner_only
       if (navBtnDashboard) navBtnDashboard.style.display = 'flex';
       if (navBtnScanner) navBtnScanner.style.display = 'flex';
       isAdmin = false;
-      // Скрываем кнопки на главном экране для scanner_only
       if (mainChecklistBtn) mainChecklistBtn.style.display = 'none';
       if (mainReportBtn) mainReportBtn.style.display = 'none';
     }
@@ -468,8 +475,6 @@ async function loadUserRole() {
     isAdmin = false;
     document.querySelector('.nav-btn[data-screen="dashboard"]').style.display = 'flex';
     document.querySelector('.nav-btn[data-screen="scanner"]').style.display = 'flex';
-    // Показываем кнопки на главном экране только если роль не scanner_only
-    // По умолчанию оставляем их видимыми, но для безопасности скрываем
     document.getElementById('checklistBtn').style.display = 'none';
     document.getElementById('reportBtn').style.display = 'none';
   }
@@ -1073,7 +1078,7 @@ function removePendingAction(inventoryNumber) {
 }
 
 // ============================
-// 10. ОБОРОТНАЯ ВЕДОМОСТЬ (с исправлением бесконечного цикла)
+// 10. ОБОРОТНАЯ ВЕДОМОСТЬ
 // ============================
 async function loadCabinetSelect() {
     const select = document.getElementById('cabinetSelect');
@@ -1100,10 +1105,8 @@ async function loadCabinetSelect() {
 }
 
 async function loadChecklistData(cabinetName, forceRefresh = false) {
-    // Защита от повторного вызова
     if (isLoadingChecklist) return;
     if (!cabinetName) return;
-    // Если уже загружена та же аудитория и не принудительно – выходим
     if (cabinetName === currentCabinetName && !forceRefresh && currentCabinetNumbers.length > 0) {
         return;
     }
@@ -1119,7 +1122,6 @@ async function loadChecklistData(cabinetName, forceRefresh = false) {
             if (Array.isArray(parsed)) {
                 currentCabinetNumbers = parsed;
                 renderChecklist(cabinetName);
-                // Фоновое обновление с сервера (если есть интернет)
                 if (navigator.onLine) {
                     updateChecklistFromServer(cabinetName);
                 }
@@ -1158,7 +1160,6 @@ async function updateChecklistFromServer(cabinetName) {
         }
     } catch (error) {
         console.warn('Не удалось обновить ведомость с сервера:', error);
-        // Если ошибка, но есть кэш – используем его
         const cached = localStorage.getItem(`checklist_${cabinetName}`);
         if (cached) {
             try {
@@ -1238,7 +1239,6 @@ function renderChecklist(cabinetName) {
         document.getElementById('checklistEditControls').style.display = 'none';
     }
 
-    // Обработчики для кнопок удаления (пересоздаются при каждом рендере)
     document.querySelectorAll('.remove-checklist-item').forEach(btn => {
         btn.addEventListener('click', function(e) {
             e.stopPropagation();
@@ -1481,7 +1481,7 @@ function renderTable(data) {
             const sheetRow = parseInt(tr2.querySelector('.row-selector').dataset.sheetRow);
             const sheet = document.getElementById('sheetSelect').value;
             if (sheetRow && colIdx >= 0) {
-                // Передаём row и col как 1-индексированные (они уже таковы)
+                // Передаём row и col как 1-индексированные
                 callProxy('updateCell', { sheetName: sheet, row: sheetRow, col: colIdx + 1, value: newValue, uid: currentUser ? currentUser.uid : null }).catch(() => {});
             }
         });
@@ -1602,8 +1602,16 @@ async function syncPendingData() {
         renderLogs();
     }
 
-    await loadInventory();
+    // Убираем повторный вызов loadInventory() – данные уже актуальны
+    // Просто обновляем статистику и карточку при необходимости
     updateDashboardStats();
+    if (currentDevice) {
+        const updated = inventoryData.find(d => d && d.inventoryNumber === currentDevice.inventoryNumber);
+        if (updated) {
+            currentDevice = updated;
+            await renderDeviceCard(updated);
+        }
+    }
 }
 
 // ============================
@@ -2006,17 +2014,19 @@ function updateActivePill(smooth = true) {
 // 17. ИНИЦИАЛИЗАЦИЯ
 // ============================
 document.addEventListener('DOMContentLoaded', async function() {
+    // Увеличенный таймаут (30 сек) – крайний случай
     const forceHideLoading = setTimeout(() => {
         const loadingScreen = document.getElementById('loading-screen');
         if (loadingScreen && !loadingScreen.classList.contains('hidden')) {
             loadingScreen.classList.add('hidden');
             const container = document.getElementById('appContainer');
             if (container) container.style.display = 'block';
-            console.warn('Загрузка принудительно скрыта по таймауту');
+            console.warn('Загрузка принудительно скрыта по таймауту (30 сек)');
         }
-    }, 10000);
+    }, 30000);
 
     try {
+        // Авторизация
         await new Promise((resolve) => {
             auth.onAuthStateChanged(async user => {
                 try {
@@ -2068,12 +2078,17 @@ document.addEventListener('DOMContentLoaded', async function() {
             });
         });
 
+        // КРИТИЧЕСКАЯ ЗАГРУЗКА ДАННЫХ – ждём её завершения
         await loadInventory();
         updateDashboardStats();
-        await loadCabinetSelect();
-        // БАГ 6: запускаем синхронизацию в фоне без await
+
+        // Загрузка селекта аудиторий – в фоне, не блокируем интерфейс
+        loadCabinetSelect();
+
+        // Синхронизация в фоне (без повторной загрузки)
         syncPendingData();
 
+        // Настройка темы
         const themeToggle = document.getElementById('themeToggle');
         const root = document.documentElement;
         const savedTheme = localStorage.getItem('appTheme');
@@ -2092,6 +2107,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             });
         }
 
+        // Активная подсветка
         activePill = document.getElementById('active-pill');
         navButtons = document.querySelectorAll('.nav-btn');
 
@@ -2110,6 +2126,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
         window.addEventListener('resize', () => updateActivePill(false));
 
+        // ===== ВСЕ ОСТАЛЬНЫЕ ОБРАБОТЧИКИ СОБЫТИЙ =====
+        // (сохранены из исходного кода без изменений)
         document.getElementById('scanBtn')?.addEventListener('click', () => showScreen('scanner'));
         document.getElementById('checklistBtn')?.addEventListener('click', () => {
             showScreen('checklist');
@@ -2315,11 +2333,9 @@ document.addEventListener('DOMContentLoaded', async function() {
                     document.getElementById('saveChecklistBtn').style.display = 'none';
                     document.getElementById('checklistEditControls').style.display = 'none';
                 }
-                // Принудительная загрузка, если аудитория изменилась
                 if (cabinet !== currentCabinetName) {
                     loadChecklistData(cabinet, true);
                 } else {
-                    // Если та же аудитория, просто обновляем отображение (возможно, изменились данные)
                     renderChecklist(cabinet);
                 }
             } else {
@@ -2650,6 +2666,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         }, 300000);
 
+        // Показываем главный экран после всех приготовлений
         showScreen('dashboard');
 
     } catch (error) {
