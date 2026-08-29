@@ -27,7 +27,7 @@ const auth = firebase.auth();
 // ============================
 // 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
-const PROXY_URL = 'https://cors.lol/' + 'https://script.google.com/macros/s/AKfycbwOva4yxWJtwdmBnlyTdo4krdxEMkfGbvKh1gaEF9LcVxnAq1SoPPSKkGXaIQogj0yZ/exec';
+const PROXY_URL = 'https://shrill-hall-edf3.dvorovds5.workers.dev';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
