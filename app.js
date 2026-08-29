@@ -27,7 +27,7 @@ const auth = firebase.auth();
 // ============================
 // 1. ПРОКСИ URL (ЗАМЕНИТЕ НА СВОЙ)
 // ============================
-const PROXY_URL = 'https://cors-proxy-2.dvorovds5.workers.dev';
+const PROXY_URL = 'https://demafps.pythonanywhere.com';
 
 // ============================
 // 2. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
