@@ -6,6 +6,7 @@
  * - Сохранение роли после успешной загрузки
  * - Улучшена обработка ошибок прокси
  * - Добавлена кнопка "Повторить загрузку роли" (опционально)
+ * - Исправлена печать отчёта на мобильных устройствах (добавлен setTimeout и рефлоу)
  */
 
 // ============================
@@ -1933,6 +1934,7 @@ function downloadCSV(csv) {
     URL.revokeObjectURL(url);
 }
 
+// ===== ИСПРАВЛЕННАЯ ФУНКЦИЯ ПЕЧАТИ (добавлен setTimeout и рефлоу) =====
 function printReport() {
     if (!inventoryData || inventoryData.length === 0) {
         showToast('Нет данных для печати', 'warning');
@@ -2076,11 +2078,20 @@ function printReport() {
     tableDiv.innerHTML = tableHtml;
     printDiv.appendChild(tableDiv);
 
-    window.print();
+    // Принудительный рефлоу для мобильных браузеров
+    printDiv.offsetHeight;
 
-    document.body.removeChild(printDiv);
-    const styleToRemove = document.getElementById('print-report-style');
-    if (styleToRemove) styleToRemove.remove();
+    // Задержка перед вызовом печати (особенно важно для мобильных устройств)
+    setTimeout(() => {
+        window.print();
+    }, 300);
+
+    // Удаляем элементы после печати
+    setTimeout(() => {
+        document.body.removeChild(printDiv);
+        const styleToRemove = document.getElementById('print-report-style');
+        if (styleToRemove) styleToRemove.remove();
+    }, 500);
 }
 
 // ============================
